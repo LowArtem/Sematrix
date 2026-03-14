@@ -358,8 +358,8 @@
             "When q is present, substring matches are prioritized before notes_count desc then name asc"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "Separate tag CRUD endpoints are not required in MVP. Tags are created through note save flows."
+          "passes": true,
+          "notes": "Separate tag CRUD endpoints are not required in MVP. Tags are created through note save flows. Added `/api/tags` through a dedicated tag service/repository path that returns `PaginatedResponse[TagDto]`, counts note usage via `note_tags`, sorts by `notes_count desc, name asc` when `q` is empty, and uses substring-match prioritization before the same secondary ordering when `q` is present."
         },
         {
           "id": "US-023",
@@ -462,8 +462,8 @@
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics. It still remains open because only the tag listing story is unfinished."
+      "passes": true,
+      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics. The epic acceptance criteria are now satisfied: all required CRUD/list endpoints from section 4.10.3 exist, backend tag normalization remains centralized, note save synchronizes links/assets before Draft vs Processing, and delete flows preserve the fixed reassignment and asset-cleanup rules."
     },
     {
       "id": "EP-005",

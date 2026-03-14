@@ -24,6 +24,7 @@
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
 - For file-backed asset uploads, validate MIME/size in the domain service and unlink the just-written file on database rollback so `./data/assets` stays consistent with `assets` and `note_assets`.
+- For `GET /api/tags`, keep tag counting in the repository via an outer join on `note_tags`, and when `q` is present use ordering that moves substring matches first without filtering the non-matching tags out of the paginated result set.
 
 ## [2026-03-14 20:18:35 +0300] - EP-004 / US-029
 Epic: Folders, tags, assets, and note CRUD domain flows
@@ -62,6 +63,43 @@ Thread: CLI run
     - FastAPI multipart routes need `python-multipart` installed at runtime; otherwise app startup fails before the new upload endpoint can register.
   - Useful context
     - `GET /api/assets/{asset_id}` now serves the persisted file with the MIME type stored in the `assets` row, so Tiptap image nodes can safely derive `src` from `/api/assets/{assetId}`.
+---
+
+## [2026-03-14 20:25:15 +0300] - EP-004 / US-022
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement GET /api/tags for sidebar and autocomplete data
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/api/routes/tags.py` plus router/dependency wiring so `GET /api/tags` now returns `PaginatedResponse[TagDto]` with the fixed `q`, `limit`, and `offset` query parameters.
+  - Extended `backend/app/domain/tags.py` with a dedicated tag listing service while preserving the existing normalization helpers, and added `backend/app/infra/tags.py` so tag list reads stay repository-backed and count note usage through `note_tags`.
+  - Implemented the required ordering rules: empty-query responses sort by `notes_count desc, name asc`, and non-empty queries prioritize substring matches before the same secondary ordering without dropping non-matching tags from the paginated result.
+  - Added `backend/tests/test_tag_list_api.py` source guards and a scratch-Postgres backend-container smoke test that validates the endpoint contract, ordering, and pagination with seeded tag usage counts.
+- Files changed
+  - `backend/app/api/dependencies.py`
+  - `backend/app/api/router.py`
+  - `backend/app/api/routes/tags.py`
+  - `backend/app/domain/tags.py`
+  - `backend/app/infra/tags.py`
+  - `backend/tests/test_tag_list_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (55 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... GET /api/tags smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-022` as passed and added a durable note about the dedicated tag service/repository flow, paginated contract, note-count aggregation, and substring-priority ordering.
+  - Re-evaluated `EP-004`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep tag listing queries in a dedicated repository so note-count aggregation and substring-priority ordering stay reusable when the sidebar/autocomplete UI grows.
+  - Gotchas encountered
+    - The `q` parameter changes ordering priority, not just filtering semantics, so the repository needs two explicit sort paths instead of a single generic `WHERE name ILIKE ...` branch.
+  - Useful context
+    - `TagDto.normalized_name` currently mirrors the stored lowercase `tags.name`, which keeps the public contract explicit without introducing a second persistence field.
 ---
 
 ## [2026-03-14 20:06:39 +0300] - EP-004 / US-027

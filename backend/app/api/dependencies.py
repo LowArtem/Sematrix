@@ -8,12 +8,14 @@ from app.domain.assets import AssetService
 from app.domain.folders import FolderService
 from app.domain.notes import NoteService
 from app.domain.system import SystemStatusService
+from app.domain.tags import TagService
 from app.infra import SessionLocal
 from app.infra.assets import SqlAlchemyAssetRepository
 from app.infra.folders import SqlAlchemyFolderRepository
 from app.infra.notes import SqlAlchemyNoteRepository
 from app.infra.pipeline import CeleryPipelineDispatcher
 from app.infra.system import RuntimeMetadataRepository
+from app.infra.tags import SqlAlchemyTagRepository
 
 
 def get_system_status_service() -> SystemStatusService:
@@ -30,6 +32,10 @@ def get_db_session() -> Iterator[Session]:
 
 def get_folder_service(session: Session = Depends(get_db_session)) -> FolderService:
     return FolderService(folder_repository=SqlAlchemyFolderRepository(session=session))
+
+
+def get_tag_service(session: Session = Depends(get_db_session)) -> TagService:
+    return TagService(tag_repository=SqlAlchemyTagRepository(session=session))
 
 
 def get_asset_service(session: Session = Depends(get_db_session)) -> AssetService:
