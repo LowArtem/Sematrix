@@ -734,8 +734,8 @@
             "If an LLM is used to create the summary, qwen3.5:9b runs in non-thinking mode"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The spec allows heuristic or LLM summary for text files, but the output must be meaningful text for search."
+          "passes": true,
+          "notes": "The spec allows heuristic or LLM summary for text files, but the output must be meaningful text for search. `sematrix.process_links` now processes `text_file` snapshot links through the shared SSRF-safe fetcher, enforces `MAX_TEXT_FILE_MB`, persists the full decoded text plus source metadata on `link_processing_results`, and generates a non-thinking Ollama summary with a warning-backed heuristic fallback when summary generation fails."
         },
         {
           "id": "US-047",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, and YouTube video/channel metadata retrieval through the official Data API are now in place, but the webpage/text processing and warning-surface stories are still open."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, and text-file link processing are now in place, but the generic webpage-processing and warning-surface stories are still open."
     },
     {
       "id": "EP-007",

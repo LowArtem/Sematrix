@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Protocol
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from celery import chord, group
@@ -148,6 +149,8 @@ class HtmlMetadataParser(HTMLParser):
 
 
 _CHARSET_RE = re.compile(r"charset=([A-Za-z0-9._-]+)", re.IGNORECASE)
+_TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml"})
+_TEXT_SUMMARY_PREVIEW_CHARS = 16000
 
 
 def _decode_link_body(body: bytes, *, content_type: str | None) -> str:
@@ -170,6 +173,42 @@ def _extract_html_metadata(document: str) -> tuple[str, str]:
     page_title = unescape(parser.page_title).strip()
     meta_description = unescape(parser.meta_description).strip()
     return page_title, meta_description
+
+
+def _extract_url_extension(url: str) -> str:
+    path = urlsplit(url).path
+    if "." not in path.rsplit("/", 1)[-1]:
+        return ""
+    return f'.{path.rsplit(".", 1)[-1].lower()}'
+
+
+def _extract_link_source_name(url: str) -> str:
+    path = urlsplit(url).path
+    filename = unquote(path.rsplit("/", 1)[-1]).strip()
+    if filename:
+        return filename
+    return url
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    if not content_type:
+        return ""
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+def _is_text_file_content_type(content_type: str | None) -> bool:
+    media_type = _normalize_content_type(content_type)
+    return media_type.startswith("text/") and media_type != "text/html"
+
+
+def _build_text_file_summary_fallback(*, source_name: str, content_text: str) -> str:
+    normalized_text = " ".join(content_text.split())
+    if not normalized_text:
+        return f'Text file "{source_name}" was processed.'
+    preview = normalized_text[:240].rstrip()
+    if len(normalized_text) > 240:
+        preview = f"{preview}..."
+    return f'Text file "{source_name}": {preview}'
 
 
 class PipelineRuntimeRepository(Protocol):
@@ -968,12 +1007,14 @@ class PipelineStageRunner:
         ollama_client: OllamaClient,
         youtube_client: YouTubeDataApiClient,
         link_fetcher: SafeLinkFetcher,
+        max_text_file_bytes: int,
     ) -> None:
         self._runtime_repository = runtime_repository
         self._ocr_client = ocr_client
         self._ollama_client = ollama_client
         self._youtube_client = youtube_client
         self._link_fetcher = link_fetcher
+        self._max_text_file_bytes = max_text_file_bytes
 
     def process_links(
         self,
@@ -1033,7 +1074,7 @@ class PipelineStageRunner:
                 )
                 continue
 
-            if link.link_type not in {"youtube_video", "youtube_channel"}:
+            if link.link_type not in {"youtube_video", "youtube_channel", "text_file"}:
                 skipped_count += 1
                 self._log_target_skip(
                     stage_name="process_links",
@@ -1065,23 +1106,34 @@ class PipelineStageRunner:
                     fetch_status = "done"
                     content_type = "application/vnd.youtube.video+json"
                 else:
-                    (
-                        page_title,
-                        extracted_text,
-                        generated_summary,
-                        metadata_json,
-                        fetch_status,
-                        warnings,
-                        content_type,
-                    ) = self._process_youtube_channel_link(url=link.url)
-            except YouTubeDataApiClientError as exc:
+                    if link.link_type == "youtube_channel":
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_youtube_channel_link(url=link.url)
+                    else:
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_text_file_link(url=link.url)
+            except (LinkFetchError, YouTubeDataApiClientError) as exc:
                 warnings = [
                     build_processing_warning(
                         stage="link_fetch",
                         target=link.url,
                         code=f"{link.link_type}_fetch_failed",
                         message=str(exc),
-                        retryable=exc.retryable,
+                        retryable=getattr(exc, "retryable", False),
                     )
                 ]
             warning_count += len(warnings)
@@ -1166,6 +1218,69 @@ class PipelineStageRunner:
             "done",
             [],
             "application/vnd.youtube.channel+json",
+        )
+
+    def _process_text_file_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(f"Text file fetch failed for {url}: HTTP {response.status_code}")
+        if len(response.body) > self._max_text_file_bytes:
+            raise LinkFetchError(f"Text file response exceeded MAX_TEXT_FILE_MB for {url}")
+
+        content_type = response.content_type
+        final_url = response.final_url
+        has_text_extension = _extract_url_extension(final_url) in _TEXT_FILE_EXTENSIONS
+        if not _is_text_file_content_type(content_type) and not has_text_extension:
+            raise LinkFetchError(f"Link did not resolve to a supported text file: {url}")
+
+        extracted_text = _decode_link_body(response.body, content_type=content_type).strip()
+        if not extracted_text:
+            raise LinkFetchError(f"Text file fetch returned empty text for {url}")
+
+        source_name = _extract_link_source_name(final_url)
+        warnings: list[dict[str, object]] = []
+        try:
+            generated_summary = self._ollama_client.generate_text_file_summary(
+                source_name=source_name,
+                content_text=extracted_text[:_TEXT_SUMMARY_PREVIEW_CHARS],
+            )
+        except OllamaClientError as exc:
+            generated_summary = _build_text_file_summary_fallback(
+                source_name=source_name,
+                content_text=extracted_text,
+            )
+            warnings = [
+                build_processing_warning(
+                    stage="link_summary",
+                    target=url,
+                    code="text_file_summary_failed",
+                    message=str(exc),
+                    retryable=False,
+                )
+            ]
+
+        metadata_json = {
+            "source": "text_file",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "content_type": response.content_type,
+            "size_bytes": len(response.body),
+            "detected_by": "content_type" if _is_text_file_content_type(content_type) else "extension",
+        }
+        return (
+            source_name,
+            extracted_text,
+            generated_summary,
+            metadata_json,
+            "done",
+            warnings,
+            content_type,
         )
 
     def _fetch_web_fallback_for_youtube_channel(self, *, url: str) -> WebPageFallbackResult:
@@ -2159,6 +2274,7 @@ def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
             max_response_bytes=settings.max_link_response_mb * 1024 * 1024,
             max_redirects=settings.link_max_redirects,
         ),
+        max_text_file_bytes=settings.max_text_file_mb * 1024 * 1024,
     )
 
 

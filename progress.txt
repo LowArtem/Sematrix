@@ -41,6 +41,41 @@
 - Keep SSRF-safe link fetching in `app/infra/link_fetcher.py`, with a no-redirect opener plus per-hop scheme/port/DNS revalidation and streamed size/time limits before any link-specific parser touches the body.
 - Keep YouTube Data API calls in `app/infra/youtube.py`, and persist both structured metadata plus derived index text/summary on `link_processing_results` so finalization can consume official API output without HTML scraping.
 - For `youtube_channel` links, keep the YouTube Data API as the default path and use the shared SSRF-safe fetcher only for retryable API-failure fallback, recording that downgrade as a warning instead of changing the primary integration design.
+- Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
+
+## [2026-03-15 01:34:54 +0300] - EP-006 / US-046
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement text-file link processing with size limits and summary generation
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now handles `text_file` snapshot links, fetches them through the shared SSRF-safe fetcher, enforces `MAX_TEXT_FILE_MB`, decodes and persists extracted text, and records text-file source metadata on `link_processing_results`.
+  - Added `backend/app/infra/ollama.py` support for non-thinking text-file summaries and a warning-backed heuristic fallback path so summary-generation failures do not discard successfully fetched text.
+  - Added `backend/tests/test_pipeline_text_file_stage.py`, updated `backend/tests/test_pipeline_youtube_video_stage.py`, and refreshed `AGENTS.md` with the durable text-file processing rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_text_file_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_text_file_stage.py backend/tests/test_youtube_api.py backend/tests/test_link_fetcher.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (114 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-046` as passed and added a durable note about SSRF-safe text-file fetching, `MAX_TEXT_FILE_MB` enforcement, durable extracted-text persistence, and non-thinking summary generation with heuristic fallback.
+  - Re-evaluated `EP-006`; it remains `passes: false` because generic webpage processing and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep text-file link processing on top of the shared safe fetcher, then degrade summary generation to a warning-backed fallback so successful text extraction still contributes to indexing.
+  - Gotchas encountered
+    - The global fetcher body cap is not enough by itself for this story; the text-file stage still needs its own `MAX_TEXT_FILE_MB` guard so the per-resource rule stays explicit.
+  - Useful context
+    - `sematrix.process_links` now has first-class support for `text_file` links, but ordinary `web` links still intentionally wait for the later main-text extraction story.
+---
 
 ## [2026-03-15 01:27:35 +0300] - EP-006 / US-045
 Epic: Image OCR/caption and secure link processing
