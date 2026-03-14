@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.dto import ApiErrorDto
+from app.domain.errors import DomainError
 
 
 _STATUS_ERROR_MAP: dict[int, tuple[str, str]] = {
@@ -58,6 +59,18 @@ def _resolve_http_error(exc: StarletteHTTPException) -> tuple[str, str, Any | No
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DomainError)
+    async def handle_domain_error(
+        request: Request,
+        exc: DomainError,
+    ) -> JSONResponse:
+        del request
+        return _build_error_response(
+            status_code=exc.status_code,
+            code=exc.code,
+            message=exc.message,
+        )
+
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation_error(
         request: Request,

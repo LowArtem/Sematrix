@@ -18,6 +18,48 @@
 - Keep backend ENV parsing centralized in `app/core/config.py` and have FastAPI/Celery bootstrap code consume shared settings there instead of scattering raw `os.getenv(...)` calls across entrypoints.
 - Keep FastAPI error shaping centralized in `app/api/errors.py`; register global handlers from app bootstrap so 404/409/413/415/422/500 responses and validation payloads stay in one `ApiErrorDto` format.
 - Keep structured logging context centralized in `app/core/logging.py`; bind API `X-Request-Id` in middleware and Celery `task_id` in worker bootstrap so route/task code can stay focused on domain work.
+- Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
+
+## [2026-03-14 19:25:46 +0300] - EP-004 / US-020
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement folder list, create, rename, and delete endpoints
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/api/routes/folders.py` and router wiring for `GET/POST/PATCH/DELETE /api/folders`, including optional substring filtering, name-sorted results, create/rename DTO validation, and `204` delete responses.
+  - Added a request-scoped database session dependency plus repository/domain-service layers in `backend/app/api/dependencies.py`, `backend/app/infra/folders.py`, and `backend/app/domain/folders.py` so folder business rules stay outside route handlers.
+  - Added reusable domain error handling for backend business conflicts/not-found cases, and used the existing unified API error formatting to surface duplicate folder names as `409 conflict` responses.
+  - Verified deletion leaves notes intact by relying on the schema's `folders -> notes` `ON DELETE SET NULL` behavior and smoke-testing that note reassignment path against a migrated scratch PostgreSQL database.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dependencies.py`
+  - `backend/app/api/dto.py`
+  - `backend/app/api/errors.py`
+  - `backend/app/api/router.py`
+  - `backend/app/api/routes/folders.py`
+  - `backend/app/domain/errors.py`
+  - `backend/app/domain/folders.py`
+  - `backend/app/infra/folders.py`
+  - `backend/tests/test_folder_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (28 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... /api/folders smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-020` as passed and added a durable note about the request-scoped session dependency, folder service/repository split, conflict handling, and delete-to-unfiled behavior.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag, note, reindex, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so CRUD routes stay thin and reusable.
+  - Gotchas encountered
+    - FastAPI's `TestClient` is unavailable in the current backend image because `httpx` is not installed, so runtime API smoke checks in containers should use a temporary Uvicorn process plus the Python standard library HTTP client unless the dependency set changes.
+  - Useful context
+    - Folder name trimming now happens in the public request DTOs, while note reassignment on folder deletion is enforced by the existing database foreign key rather than route-level manual note updates.
+---
 
 ## [2026-03-14 19:16:13 +0300] - EP-003 / US-019
 Epic: Backend application skeleton, configuration, and API contracts

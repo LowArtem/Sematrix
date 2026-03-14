@@ -332,8 +332,8 @@
             "DELETE /api/folders/{id} moves existing notes to folder_id = null and returns 204"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Folders are a flat list only. Deleting a folder must not delete its notes."
+          "passes": true,
+          "notes": "Folders are a flat list only. Deleting a folder must not delete its notes. Implemented `/api/folders` CRUD through a request-scoped SQLAlchemy session dependency, a folder domain service, and a repository-backed route layer that trims names, returns name-sorted list results, surfaces duplicate names as 409 conflicts, and relies on the database `ON DELETE SET NULL` behavior so note rows become unfiled on folder deletion."
         },
         {
           "id": "US-021",
