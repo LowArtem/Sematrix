@@ -41,6 +41,17 @@ def upgrade() -> None:
     )
     pipeline_run_status.create(op.get_bind(), checkfirst=True)
 
+    link_type = postgresql.ENUM(
+        "youtube_video",
+        "youtube_channel",
+        "web",
+        "text_file",
+        "other",
+        name="link_type",
+        create_type=False,
+    )
+    link_type.create(op.get_bind(), checkfirst=True)
+
     op.create_table(
         "folders",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -192,6 +203,39 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("note_id", "asset_id", name=op.f("pk_note_assets")),
+    )
+
+    op.create_table(
+        "note_links",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("url", sa.Text(), nullable=False),
+        sa.Column("normalized_url", sa.Text(), nullable=False),
+        sa.Column("link_type", link_type, server_default=sa.text("'other'"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["note_id"],
+            ["notes.id"],
+            name=op.f("fk_note_links_note_id_notes"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_note_links")),
+        sa.UniqueConstraint(
+            "note_id",
+            "normalized_url",
+            name=op.f("uq_note_links_note_id_normalized_url"),
+        ),
     )
 
     op.create_table(
@@ -351,6 +395,12 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
+            ["link_id"],
+            ["note_links.id"],
+            name=op.f("fk_link_processing_results_link_id_note_links"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
             ["note_id"],
             ["notes.id"],
             name=op.f("fk_link_processing_results_note_id_notes"),
@@ -419,12 +469,21 @@ def downgrade() -> None:
     op.drop_table("link_processing_results")
     op.drop_table("asset_processing_results")
     op.drop_table("pipeline_runs")
+    op.drop_table("note_links")
     op.drop_table("note_assets")
     op.drop_table("note_tags")
     op.drop_table("assets")
     op.drop_table("tags")
     op.drop_table("notes")
     op.drop_table("folders")
+    sa.Enum(
+        "youtube_video",
+        "youtube_channel",
+        "web",
+        "text_file",
+        "other",
+        name="link_type",
+    ).drop(op.get_bind(), checkfirst=True)
     sa.Enum("Processing", "Ready", "Error", name="pipeline_run_status").drop(
         op.get_bind(),
         checkfirst=True,

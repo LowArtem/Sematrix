@@ -177,8 +177,8 @@
             "The schema can enforce or support unique (note_id, normalized_url) deduplication"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "Links are scoped to a specific note in MVP. Global shared link cache is explicitly not required."
+          "passes": true,
+          "notes": "Links are scoped to a specific note in MVP. Global shared link cache is explicitly not required. Added a typed `NoteLink` model plus Alembic schema for per-note URLs, normalized-url deduplication, the fixed link-type enum, and the `link_processing_results.link_id` foreign key, then validated the migrated table and constraints against a scratch PostgreSQL database."
         },
         {
           "id": "US-012",
@@ -224,8 +224,8 @@
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. `US-014` now locks in the required listing/search/result-table indexes and validates them against PostgreSQL, but the epic still remains open because `note_links` is not finished yet."
+      "passes": true,
+      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. The schema now includes the full MVP table set, including per-note `note_links`, the required RU+EN generated `notes.search_tsv`, `VECTOR(1024)` embeddings, and the `link_processing_results.link_id` foreign key back to `note_links`, all revalidated through scratch-PostgreSQL Alembic migrations."
     },
     {
       "id": "EP-003",

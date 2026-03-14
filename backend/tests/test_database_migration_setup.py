@@ -41,6 +41,7 @@ def test_core_schema_models_are_registered() -> None:
     assert "class Tag(Base):" in models_module
     assert "class LinkProcessingResult(Base):" in models_module
     assert "class NoteAsset(Base):" in models_module
+    assert "class NoteLink(Base):" in models_module
     assert "class NoteTag(Base):" in models_module
     assert "class PipelineRun(Base):" in models_module
     assert 'storage_key: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)' in models_module
@@ -60,6 +61,10 @@ def test_core_schema_models_are_registered() -> None:
     assert 'UniqueConstraint("pipeline_run_id", "link_id")' in models_module
     assert 'Index("ix_asset_processing_results_note_id_index_version", "note_id", "index_version")' in models_module
     assert 'Index("ix_link_processing_results_note_id_index_version", "note_id", "index_version")' in models_module
+    assert 'LINK_TYPE_VALUES = ("youtube_video", "youtube_channel", "web", "text_file", "other")' in models_module
+    assert '__table_args__ = (UniqueConstraint("note_id", "normalized_url"),)' in models_module
+    assert 'Enum(*LINK_TYPE_VALUES, name="link_type", native_enum=True)' in models_module
+    assert 'ForeignKey("note_links.id", ondelete="CASCADE")' in models_module
     assert 'ocr_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("\'pending\'"))' in models_module
     assert 'generated_summary: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("\'\'"))' in models_module
 
@@ -76,10 +81,12 @@ def test_initial_revision_creates_core_schema() -> None:
     assert 'op.create_table(\n        "assets"' in revision_module
     assert 'op.create_table(\n        "note_tags"' in revision_module
     assert 'op.create_table(\n        "note_assets"' in revision_module
+    assert 'op.create_table(\n        "note_links"' in revision_module
     assert 'op.create_table(\n        "pipeline_runs"' in revision_module
     assert 'op.create_table(\n        "asset_processing_results"' in revision_module
     assert 'op.create_table(\n        "link_processing_results"' in revision_module
     assert 'sa.UniqueConstraint("storage_key", name=op.f("uq_assets_storage_key"))' in revision_module
+    assert 'sa.UniqueConstraint(\n            "note_id",\n            "normalized_url",' in revision_module
     assert 'sa.UniqueConstraint("note_id", "index_version", name=op.f("uq_pipeline_runs_note_id_index_version"))' in revision_module
     assert 'sa.UniqueConstraint(\n            "pipeline_run_id",\n            "asset_id",' in revision_module
     assert 'sa.UniqueConstraint(\n            "pipeline_run_id",\n            "link_id",' in revision_module
@@ -91,5 +98,7 @@ def test_initial_revision_creates_core_schema() -> None:
     assert 'op.create_index(\n        op.f("ix_asset_processing_results_note_id_index_version"),' in revision_module
     assert 'op.create_index(\n        op.f("ix_link_processing_results_note_id_index_version"),' in revision_module
     assert 'postgresql.ARRAY(postgresql.UUID(as_uuid=True))' in revision_module
+    assert 'sa.ForeignKeyConstraint(\n            ["link_id"],\n            ["note_links.id"],' in revision_module
+    assert 'sa.Enum(\n        "youtube_video",\n        "youtube_channel",\n        "web",\n        "text_file",\n        "other",\n        name="link_type",' in revision_module
     assert 'sa.Enum("Processing", "Ready", "Error", name="pipeline_run_status")' in revision_module
     assert 'sa.Enum("Draft", "Processing", "Ready", "Error", name="note_status")' in revision_module

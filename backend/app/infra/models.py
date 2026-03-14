@@ -27,6 +27,7 @@ from app.infra.db import Base
 
 NOTE_STATUS_VALUES = ("Draft", "Processing", "Ready", "Error")
 PIPELINE_RUN_STATUS_VALUES = ("Processing", "Ready", "Error")
+LINK_TYPE_VALUES = ("youtube_video", "youtube_channel", "web", "text_file", "other")
 SEARCH_TSV_EXPRESSION = (
     "to_tsvector('russian', coalesce(search_text, '')) "
     "|| to_tsvector('english', coalesce(search_text, ''))"
@@ -110,6 +111,7 @@ class Note(Base):
     asset_processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
         back_populates="note"
     )
+    links: Mapped[list["NoteLink"]] = relationship(back_populates="note")
     link_processing_results: Mapped[list["LinkProcessingResult"]] = relationship(
         back_populates="note"
     )
@@ -188,6 +190,38 @@ class NoteAsset(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class NoteLink(Base):
+    __tablename__ = "note_links"
+    __table_args__ = (UniqueConstraint("note_id", "normalized_url"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
+    link_type: Mapped[str] = mapped_column(
+        Enum(*LINK_TYPE_VALUES, name="link_type", native_enum=True),
+        nullable=False,
+        server_default=text("'other'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    note: Mapped[Note] = relationship(back_populates="links")
+    processing_results: Mapped[list["LinkProcessingResult"]] = relationship(back_populates="link")
 
 
 class PipelineRun(Base):
@@ -312,7 +346,11 @@ class LinkProcessingResult(Base):
         ForeignKey("notes.id", ondelete="CASCADE"),
         nullable=False,
     )
-    link_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    link_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("note_links.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     index_version: Mapped[int] = mapped_column(Integer, nullable=False)
     page_title: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -345,5 +383,6 @@ class LinkProcessingResult(Base):
         server_default=func.now(),
     )
 
+    link: Mapped[NoteLink] = relationship(back_populates="processing_results")
     note: Mapped[Note] = relationship(back_populates="link_processing_results")
     pipeline_run: Mapped[PipelineRun] = relationship(back_populates="link_processing_results")

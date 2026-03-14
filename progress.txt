@@ -50,6 +50,43 @@ Thread: CLI run
     - The exact RU+EN generated `search_tsv` expression was already in place from the earlier notes schema work, so this story only had to harden the index layer around that fixed search storage contract.
 ---
 
+## [2026-03-14 18:45:17 +0300] - EP-002 / US-011
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create note_links for per-note extracted links
+Thread: CLI run
+- What was implemented
+  - Added a typed `NoteLink` SQLAlchemy model with the fixed per-note fields, `(note_id, normalized_url)` deduplication, and the required `youtube_video/youtube_channel/web/text_file/other` link-type enum.
+  - Expanded the existing Alembic head revision to create `note_links`, register/drop the `link_type` enum, and upgrade `link_processing_results.link_id` from a plain UUID to a cascading foreign key back to `note_links`.
+  - Extended the schema guard tests and validated the migrated PostgreSQL schema against a scratch database, including the `note_links` columns/constraints and the new `link_processing_results -> note_links` foreign key.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... pg_isready` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_note_links_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_note_links_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `note_links` columns, `(note_id, normalized_url)` uniqueness, and the `link_processing_results.link_id -> note_links.id` foreign key ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-011` as passed and added a durable note about the new `note_links` schema, link-type enum, and the foreign-key wiring into `link_processing_results`.
+  - Re-evaluated `EP-002`; all nested stories and epic-level schema acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing schema-validation patterns.
+  - Gotchas encountered
+    - `link_processing_results.link_id` can be introduced as a UUID early, then tightened to a real `note_links` foreign key once the per-note links table lands.
+  - Useful context
+    - `note_links` now owns the canonical per-note link IDs that later save, snapshot, and link-processing stories should reference instead of ad hoc URL payloads.
+---
+
 ## [2026-03-14 18:34:58 +0300] - EP-002 / US-013
 Epic: Database schema, pgvector, and migrations
 Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
