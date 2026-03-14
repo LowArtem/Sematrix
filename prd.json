@@ -288,8 +288,8 @@
             "NoteCardDto and NoteDetailDto expose status and warning fields exactly as required"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes the minimum DTO surface and the split between listing cards and note detail."
+          "passes": true,
+          "notes": "The spec fixes the minimum DTO surface and the split between listing cards and note detail. Added explicit Pydantic DTOs for the public note/folder/tag/asset contracts plus folder-create/update and note-save request payloads, with strict `extra=forbid` validation and a generic `PaginatedResponse[T]` model for list endpoints."
         },
         {
           "id": "US-019",
@@ -307,7 +307,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton, shared ENV-driven settings layer, and unified API error format now follow the required foundation constraints, but the public DTO and structured logging stories are still open."
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton, shared ENV-driven settings layer, unified API error format, and public DTO contracts now follow the required foundation constraints, but the structured logging story is still open."
     },
     {
       "id": "EP-004",

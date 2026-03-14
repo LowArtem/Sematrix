@@ -699,6 +699,37 @@ Thread: CLI run
     - Keep FastAPI error normalization centralized in `app/api/errors.py` and register it from app bootstrap so routes stay focused on HTTP/domain flow instead of response shaping.
   - Gotchas encountered
     - The backend image does not include `httpx`, so runtime smoke checks should call registered exception handlers directly unless/until `TestClient` support is added intentionally.
+- Useful context
+  - The current handler map covers validation plus `404`, `409`, `413`, `415`, `422`, and `500` with stable `code` values like `validation_error` and `internal_server_error`.
+---
+
+## [2026-03-14 19:09:36 +0300] - EP-003 / US-018
+Epic: Backend application skeleton, configuration, and API contracts
+Epic Branch: ralph/sematrix-mvp/ep-003-backend-foundation
+Story: Define the public request and response DTOs required by the MVP API
+Thread: CLI run
+- What was implemented
+  - Expanded `backend/app/api/dto.py` with the public response DTOs required by the spec: `TagRefDto`, generic `PaginatedResponse[T]`, `AsyncAcceptedDto`, `NoteCardDto`, `NoteDetailDto`, `FolderDto`, `TagDto`, and `AssetDto`.
+  - Added explicit folder-create/update and note-save request payload models so the backend contract for upcoming CRUD routes is declared in one place.
+  - Made the DTOs strict with `extra="forbid"` and added source-based contract tests plus a backend-container smoke check that instantiates representative models.
+- Files changed
+  - `backend/app/api/dto.py`
+  - `backend/tests/test_api_dto_contracts.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (23 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "...DTO instantiation smoke check..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-018` as passed and added a durable note about the new public DTO/request model layer and strict validation.
+  - Re-evaluated `EP-003`; it remains `passes: false` because the structured logging story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing backend API contract patterns.
+  - Gotchas encountered
+    - Pydantic generic response models can stay lightweight here by using `BaseModel` with `Generic[T]`, which keeps the shared paginated contract explicit without introducing extra framework-specific helpers.
   - Useful context
-    - The current handler map covers validation plus `404`, `409`, `413`, `415`, `422`, and `500` with stable `code` values like `validation_error` and `internal_server_error`.
+    - `NoteSaveRequestDto` models the fixed Save payload (`title`, `folder_id`, `tags`, `content_json`), while `POST /api/notes` still remains a no-body create flow from the spec.
 ---
