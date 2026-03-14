@@ -11,7 +11,7 @@ from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
 from app.domain.errors import NotFoundError
 from app.domain.tags import normalize_tag_names
-from app.infra.notes import NoteRecord, NoteRepository
+from app.infra.notes import DraftCleanupRecord, NoteRecord, NoteRepository
 
 
 HASHTAG_PATTERN = re.compile(r"(?<!\w)#([0-9A-Za-z_\u0400-\u04FF]+)")
@@ -68,6 +68,14 @@ class ParsedNoteQuery:
 class NoteSaveOutcome:
     note: NoteResult
     pipeline_started: bool
+
+
+@dataclass(frozen=True)
+class DraftCleanupResult:
+    candidate_count: int
+    deleted_draft_count: int
+    deleted_asset_count: int
+    deletion_errors: list[str]
 
 
 class PipelineDispatcher(Protocol):
@@ -224,6 +232,24 @@ class NoteService:
             has_warnings=note.has_warnings,
             warnings_count=note.warnings_count,
             score=note.score,
+        )
+
+
+class DraftCleanupService:
+    def __init__(self, note_repository: NoteRepository) -> None:
+        self._note_repository = note_repository
+
+    def cleanup_expired_empty_drafts(self, *, ttl_hours: int) -> DraftCleanupResult:
+        cleanup_result = self._note_repository.cleanup_expired_empty_drafts(ttl_hours=ttl_hours)
+        return self._to_cleanup_result(cleanup_result)
+
+    @staticmethod
+    def _to_cleanup_result(cleanup_result: DraftCleanupRecord) -> DraftCleanupResult:
+        return DraftCleanupResult(
+            candidate_count=cleanup_result.candidate_count,
+            deleted_draft_count=cleanup_result.deleted_draft_count,
+            deleted_asset_count=cleanup_result.deleted_asset_count,
+            deletion_errors=cleanup_result.deletion_errors,
         )
 
 

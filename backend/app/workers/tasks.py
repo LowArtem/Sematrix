@@ -1,9 +1,11 @@
 from time import perf_counter
 from uuid import UUID
 
+from app.core import get_logger, get_settings
+from app.domain.notes import DraftCleanupService
 from app.domain.system import WorkerHeartbeatService
-from app.core import get_logger
 from app.infra import SessionLocal
+from app.infra.notes import SqlAlchemyNoteRepository
 from app.infra.pipeline import (
     build_pipeline_failure_handler,
     build_pipeline_finalizer,
@@ -14,6 +16,7 @@ from app.workers.celery_app import celery_app
 
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 NETWORK_TASK_AUTORETRY_FOR = (Exception,)
 NETWORK_TASK_RETRY_KWARGS = {"max_retries": 2}
@@ -32,6 +35,41 @@ def ping(self) -> str:
     )
     service = WorkerHeartbeatService()
     return service.ping()
+
+
+@celery_app.task(bind=True, name="sematrix.cleanup_drafts")
+def cleanup_drafts(self) -> dict[str, object]:
+    logger.info(
+        "draft_cleanup_requested",
+        extra={
+            "event": "draft_cleanup_requested",
+            "task_name": self.name,
+        },
+    )
+    session = SessionLocal()
+    try:
+        service = DraftCleanupService(note_repository=SqlAlchemyNoteRepository(session=session))
+        result = service.cleanup_expired_empty_drafts(ttl_hours=settings.draft_ttl_hours)
+    finally:
+        session.close()
+
+    logger.info(
+        "draft_cleanup_finished",
+        extra={
+            "event": "draft_cleanup_finished",
+            "task_name": self.name,
+            "candidate_count": result.candidate_count,
+            "deleted_draft_count": result.deleted_draft_count,
+            "deleted_asset_count": result.deleted_asset_count,
+            "deletion_errors": result.deletion_errors,
+        },
+    )
+    return {
+        "candidate_count": result.candidate_count,
+        "deleted_draft_count": result.deleted_draft_count,
+        "deleted_asset_count": result.deleted_asset_count,
+        "deletion_errors": result.deletion_errors,
+    }
 
 
 @celery_app.task(bind=True, name="sematrix.start_pipeline")

@@ -57,6 +57,10 @@ class StructuredJsonFormatter(logging.Formatter):
             "duration_ms",
             "total_duration_ms",
             "stage_durations_ms",
+            "candidate_count",
+            "deleted_draft_count",
+            "deleted_asset_count",
+            "deletion_errors",
         ):
             value = getattr(record, field_name, None)
             if value is not None:

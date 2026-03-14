@@ -604,8 +604,8 @@
             "Cleanup logs candidate count, deleted Draft count, deleted asset count, and deletion errors if any"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Periodic tasks must not be scheduled by the backend process. The spec explicitly requires celery beat for TTL cleanup."
+          "passes": true,
+          "notes": "Periodic tasks must not be scheduled by the backend process. The spec explicitly requires celery beat for TTL cleanup. Added a dedicated `sematrix.cleanup_drafts` worker task plus a Celery beat schedule driven by `DRAFT_TTL_HOURS`, with cleanup emptiness evaluated from parsed `content_json` meaningful-content state so abandoned pre-save uploads can still be TTL-deleted while only truly unreferenced asset files are removed."
         },
         {
           "id": "US-039",
@@ -625,7 +625,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs, and the worker tasks now enforce the fixed retry policy for link/OCR/caption stages. Draft cleanup and the remaining fast-summary/title lifecycle work still remain before the epic can pass."
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs, the worker tasks now enforce the fixed retry policy for link/OCR/caption stages, and Celery beat now runs TTL cleanup for empty Draft notes using the same parsed-content meaningfulness rule as save-time lifecycle decisions. The remaining fast-summary/title lifecycle work still remains before the epic can pass."
     },
     {
       "id": "EP-006",

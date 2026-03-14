@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.domain.errors import NotFoundError
+from app.domain.note_content import ExtractedLink, parse_note_content
 from app.domain.note_lifecycle import build_draft_reset_state
-from app.domain.note_content import ExtractedLink
+from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.pipeline import compute_snapshot_hash
 from app.infra.assets import get_asset_path
 from app.infra.models import Asset, Folder, Note, NoteAsset, NoteLink, NoteTag, PipelineRun, Tag
@@ -68,6 +69,14 @@ class ReindexNoteRecord:
     pipeline_run: PipelineRunRecord
 
 
+@dataclass(frozen=True)
+class DraftCleanupRecord:
+    candidate_count: int
+    deleted_draft_count: int
+    deleted_asset_count: int
+    deletion_errors: list[str]
+
+
 class NoteRepository(Protocol):
     def create_note(self) -> NoteRecord: ...
 
@@ -76,6 +85,8 @@ class NoteRepository(Protocol):
     def delete_note(self, note_id: UUID) -> None: ...
 
     def reindex_note(self, note_id: UUID, *, request_id: str | None) -> ReindexNoteRecord: ...
+
+    def cleanup_expired_empty_drafts(self, *, ttl_hours: int) -> DraftCleanupRecord: ...
 
     def save_note(
         self,
@@ -125,15 +136,59 @@ class SqlAlchemyNoteRepository:
         if note is None:
             raise NotFoundError("Note not found")
 
-        candidate_assets = list(note.assets)
-        self._session.delete(note)
-        self._session.flush()
-
-        asset_storage_keys_to_delete = self._delete_unused_assets(candidate_assets)
+        asset_storage_keys_to_delete = self._delete_note_entity(note)
         self._session.commit()
 
         for storage_key in asset_storage_keys_to_delete:
             get_asset_path(storage_key).unlink(missing_ok=True)
+
+    def cleanup_expired_empty_drafts(self, *, ttl_hours: int) -> DraftCleanupRecord:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
+        expired_drafts = list(
+            self._session.scalars(
+                select(Note)
+                .where(Note.status == "Draft", Note.updated_at <= cutoff)
+                .options(selectinload(Note.assets))
+            )
+        )
+
+        expired_draft_ids: list[UUID] = []
+        deletion_errors: list[str] = []
+
+        for note in expired_drafts:
+            try:
+                if self._is_empty_draft_candidate(note):
+                    expired_draft_ids.append(note.id)
+            except Exception as exc:
+                deletion_errors.append(f"{note.id}: {exc}")
+
+        deleted_draft_count = 0
+        deleted_asset_count = 0
+
+        for note_id in expired_draft_ids:
+            try:
+                note = self._get_note_for_delete(note_id)
+                if note is None:
+                    continue
+
+                asset_storage_keys_to_delete = self._delete_note_entity(note)
+                self._session.commit()
+
+                for storage_key in asset_storage_keys_to_delete:
+                    get_asset_path(storage_key).unlink(missing_ok=True)
+
+                deleted_draft_count += 1
+                deleted_asset_count += len(asset_storage_keys_to_delete)
+            except Exception as exc:
+                self._session.rollback()
+                deletion_errors.append(f"{note_id}: {exc}")
+
+        return DraftCleanupRecord(
+            candidate_count=len(expired_draft_ids),
+            deleted_draft_count=deleted_draft_count,
+            deleted_asset_count=deleted_asset_count,
+            deletion_errors=deletion_errors,
+        )
 
     def reindex_note(self, note_id: UUID, *, request_id: str | None) -> ReindexNoteRecord:
         note = self._get_note_with_relations(note_id)
@@ -357,6 +412,21 @@ class SqlAlchemyNoteRepository:
         for existing_link in note.links:
             if existing_link.normalized_url not in kept_normalized_urls:
                 self._session.delete(existing_link)
+
+    @staticmethod
+    def _is_empty_draft_candidate(note: Note) -> bool:
+        parsed_content = parse_note_content(note.content_json)
+        return not has_meaningful_content(
+            content_text_flat=parsed_content.content_text_flat,
+            asset_count=len(parsed_content.asset_ids),
+            link_count=len(parsed_content.links),
+        )
+
+    def _delete_note_entity(self, note: Note) -> list[str]:
+        candidate_assets = list(note.assets)
+        self._session.delete(note)
+        self._session.flush()
+        return self._delete_unused_assets(candidate_assets)
 
     def _delete_unused_assets(self, candidate_assets: list[Asset]) -> list[str]:
         if not candidate_assets:

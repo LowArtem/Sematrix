@@ -185,6 +185,7 @@ YouTube-specific rule:
 
 - Empty/abandoned Draft notes are expected and must be cleaned up by a scheduled TTL job.
 - Draft cleanup belongs to the worker layer and must be scheduled via **celery beat**, not the API process.
+- Draft cleanup emptiness should follow the same meaningful-content rule as Save, using the current `content_json` state rather than lingering pre-save `note_assets` rows alone, so abandoned Draft uploads remain TTL-cleanable.
 - Persistent runtime data lives under `./data`.
 - Configuration should come from **ENV** with sensible defaults.
 - The repo should remain reproducible from a fresh checkout with Docker-based startup.

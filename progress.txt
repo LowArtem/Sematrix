@@ -33,6 +33,7 @@
 - Keep final note finalization in `app/infra/pipeline.py` with an injected `app/infra/ollama.py` client so `finalize_pipeline` rebuilds `search_text`, embeddings, and final summary from durable PostgreSQL results while smoke tests can swap in fake local-model clients.
 - Keep pipeline failure handling in `app/infra/pipeline.py` so `pipeline_failed` can revalidate runtime state, downgrade non-critical stage failures into note warnings, and fall back to a shared finalizer or Error write from one place.
 - Keep the fixed Celery retry policy encoded on the worker task definitions themselves so link processing gets 3 total attempts with exponential backoff while OCR/image-caption get 2 total attempts without drifting from the spec.
+- For Draft TTL cleanup, evaluate emptiness from parsed `content_json` with the shared meaningful-content rule instead of raw `note_assets` rows alone, so abandoned pre-save uploads remain cleanup-eligible while orphaned asset files can still be removed.
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
@@ -1455,6 +1456,44 @@ Thread: CLI run
     - None beyond the existing backend API contract patterns.
   - Gotchas encountered
     - Pydantic generic response models can stay lightweight here by using `BaseModel` with `Generic[T]`, which keeps the shared paginated contract explicit without introducing extra framework-specific helpers.
+- Useful context
+  - `NoteSaveRequestDto` models the fixed Save payload (`title`, `folder_id`, `tags`, `content_json`), while `POST /api/notes` still remains a no-body create flow from the spec.
+---
+
+## [2026-03-14 21:44:56 +0300] - EP-005 / US-038
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement periodic Draft TTL cleanup through celery beat
+Thread: CLI run
+- What was implemented
+  - Added a dedicated `sematrix.cleanup_drafts` worker task plus a Celery beat schedule in `backend/app/workers/celery_app.py` that runs every `DRAFT_TTL_HOURS`, keeping periodic cleanup in the worker layer instead of the API process.
+  - Added `DraftCleanupService` in `backend/app/domain/notes.py` and a repository-backed cleanup flow in `backend/app/infra/notes.py` that finds expired `Draft` notes, evaluates emptiness from parsed `content_json` via the shared meaningful-content rule, deletes eligible notes, and removes only truly orphaned asset files after commit.
+  - Extended structured logging in `backend/app/core/logging.py`, added source guards in `backend/tests/test_draft_cleanup.py`, and smoke-tested cleanup against scratch PostgreSQL with one expired empty Draft plus shared/orphan asset cases.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/core/logging.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/app/workers/celery_app.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_draft_cleanup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_draft_cleanup.py backend/tests/test_note_meaningful_content.py backend/tests/test_pipeline_orchestration.py` ✅
+  - `python -m pytest` ✅ (75 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... Draft cleanup smoke test with expired empty Draft + shared/orphan assets ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-038` as passed and added a durable note about the beat-driven cleanup task, `DRAFT_TTL_HOURS` schedule, parsed-content emptiness checks, and orphan-asset-only deletion.
+  - Re-evaluated `EP-005`; it remains `passes: false` because the fast-summary/title lifecycle story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep Draft TTL cleanup on the worker side with a beat schedule, while the repository evaluates cleanup eligibility from parsed note content so pre-save asset uploads do not block abandoned Draft deletion.
+  - Gotchas encountered
+    - Using raw `note_assets` rows as the cleanup signal would incorrectly preserve abandoned Drafts that uploaded images before the first meaningful Save.
   - Useful context
-    - `NoteSaveRequestDto` models the fixed Save payload (`title`, `folder_id`, `tags`, `content_json`), while `POST /api/notes` still remains a no-body create flow from the spec.
+    - The cleanup path now logs candidate/deleted/error counts in structured JSON, so later operations work can monitor beat-driven Draft cleanup without adding new logging infrastructure.
 ---

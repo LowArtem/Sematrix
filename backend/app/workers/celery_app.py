@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+from datetime import timedelta
 from typing import Any
 
 from celery import Celery
@@ -27,7 +28,12 @@ celery_app = Celery(
 celery_app.conf.update(
     task_default_queue="sematrix",
     timezone="UTC",
-    beat_schedule={},
+    beat_schedule={
+        "draft-cleanup": {
+            "task": "sematrix.cleanup_drafts",
+            "schedule": timedelta(hours=settings.draft_ttl_hours),
+        }
+    },
     worker_hijack_root_logger=False,
 )
 
