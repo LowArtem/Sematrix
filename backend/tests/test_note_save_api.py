@@ -37,7 +37,8 @@ def test_note_save_service_parses_content_and_dispatches_pipeline() -> None:
     assert 'if node_type == "image" and isinstance(attrs.get("assetId"), str):' in parsing_source
     assert 'if not isinstance(mark, dict) or mark.get("type") != "link":' in parsing_source
     assert 'pipeline_dispatcher=CeleryPipelineDispatcher(),' in dependency_source
-    assert 'start_pipeline.delay(' in pipeline_source
+    assert 'celery_app.send_task(' in pipeline_source
+    assert '"sematrix.start_pipeline"' in pipeline_source
 
 
 def test_note_save_repository_syncs_links_assets_and_processing_state() -> None:
@@ -68,3 +69,5 @@ def test_note_save_repository_syncs_links_assets_and_processing_state() -> None:
     assert 'note.processing_warnings = draft_reset_state.processing_warnings' in infra_source
     assert 'name="sematrix.start_pipeline"' in worker_source
     assert '"pipeline_entrypoint_requested"' in worker_source
+    assert 'name="sematrix.finalize_pipeline"' in worker_source
+    assert 'name="sematrix.pipeline_failed"' in worker_source

@@ -530,8 +530,8 @@
             "If at least one stage exists, they run in parallel via group/chord; if none exist, finalize_pipeline is called directly"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly forbids the API from launching individual enrichment stages directly."
+          "passes": true,
+          "notes": "The spec explicitly forbids the API from launching individual enrichment stages directly. `sematrix.start_pipeline` now loads the current `pipeline_runs` snapshot for `(note_id, index_version)`, skips stale versions before any scheduling, derives enabled coarse-grained stages from snapshot assets/links plus `DISABLE_*` flags, and dispatches either a `group/chord` flow with `finalize_pipeline` + `pipeline_failed` callbacks or a direct `finalize_pipeline` call when no stages apply."
         },
         {
           "id": "US-034",
@@ -625,7 +625,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, but orchestration, stage guards, finalization, failure handling, cleanup, and related lifecycle work still remain before the epic can pass."
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, and `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs. Stage guards, full finalization, failure handling, cleanup, and related lifecycle work still remain before the epic can pass."
     },
     {
       "id": "EP-006",

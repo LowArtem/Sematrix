@@ -28,6 +28,41 @@
 - For file-backed asset uploads, validate MIME/size in the domain service and unlink the just-written file on database rollback so `./data/assets` stays consistent with `assets` and `note_assets`.
 - For `GET /api/tags`, keep tag counting in the repository via an outer join on `note_tags`, and when `q` is present use ordering that moves substring matches first without filtering the non-matching tags out of the paginated result set.
 - Create `pipeline_runs` inside the same note save/reindex repository transaction after flushing synchronized `note_assets` and `note_links`, so snapshots capture DB-assigned link IDs before dispatching background work.
+- Keep pipeline stage selection in `app/domain/pipeline.py`, and let the worker-side orchestrator load `pipeline_runs` snapshot state from the repository before it schedules any Celery `group/chord` work.
+
+## [2026-03-14 21:02:40 +0300] - EP-005 / US-033
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement start_pipeline as the only orchestration entrypoint
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/domain/pipeline.py` with a shared stage-selection helper that derives the coarse-grained `process_links`, `process_ocr`, and `process_image_caption` stages from snapshot assets/links plus the `DISABLE_*` flags.
+  - Reworked `backend/app/infra/pipeline.py` so the API dispatcher still enqueues only `sematrix.start_pipeline`, while the worker-side orchestrator now reloads the current `pipeline_runs` snapshot, skips stale note versions before scheduling, dispatches enabled stages through Celery `group/chord`, and falls back to a direct `sematrix.finalize_pipeline` call when no stages apply.
+  - Expanded `backend/app/workers/tasks.py` with the orchestration-facing task names for `process_links`, `process_ocr`, `process_image_caption`, `finalize_pipeline`, and `pipeline_failed`, and added source guards in `backend/tests/test_pipeline_orchestration.py` plus updated save-flow assertions.
+- Files changed
+  - `backend/app/domain/pipeline.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_note_save_api.py`
+  - `backend/tests/test_pipeline_orchestration.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (61 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "from app.domain.pipeline import build_pipeline_stages; from app.workers.tasks import start_pipeline, finalize_pipeline, pipeline_failed; ..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-033` as passed and added a durable note about snapshot-aware stage selection, stale-version skipping, `group/chord` orchestration, and direct-finalize fallback.
+  - Re-evaluated `EP-005`; it remains `passes: false` because stage guards, full finalization, failure handling, retry policy, cleanup, and related lifecycle stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep stage selection as a pure helper in `app/domain/pipeline.py`, then let the worker-side orchestrator combine it with repository-loaded snapshot state so Celery scheduling logic stays deterministic and testable.
+  - Gotchas encountered
+    - Host-side pytest in this repo still cannot import backend runtime dependencies like SQLAlchemy, so orchestration tests need to stay source-based unless they run inside the backend container.
+  - Useful context
+    - `sematrix.start_pipeline` now passes the current `pipeline_run_id` into scheduled stage/finalize/error task signatures, which gives the next stage-guard and finalization stories the snapshot key they need without changing the API entrypoint contract.
+---
 
 ## [2026-03-14 20:52:27 +0300] - EP-005 / US-032
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
