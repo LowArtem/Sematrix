@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sematrix</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <p class="eyebrow">Sematrix MVP</p>
+        <h1>Local-first notes runtime scaffold</h1>
+        <p class="lede">
+          The Docker Compose baseline is up, so future stories can fill in the
+          backend API, workers, and note UI on top of a running stack.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Services in this compose stack</h2>
+        <ul>
+          <li>Postgres with pgvector</li>
+          <li>Redis for Celery broker and results</li>
+          <li>Ollama for local models</li>
+          <li>FastAPI backend</li>
+          <li>Celery worker and beat</li>
+          <li>Frontend served by Nginx</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

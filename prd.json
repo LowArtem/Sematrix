@@ -38,8 +38,8 @@
             "Frontend and backend services are reachable on the fixed ports from the spec"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The output section fixes the required services. Compose must be the single local runtime entrypoint."
+          "passes": true,
+          "notes": "The output section fixes the required services. Compose must be the single local runtime entrypoint. Added a seven-service compose baseline with minimal FastAPI/Celery runtime entrypoints, a smoke-testable frontend placeholder, and compose validation coverage via `docker compose config --services`."
         },
         {
           "id": "US-003",

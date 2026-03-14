@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
+- Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
 
 ## [2026-03-14 16:02:46 +0300] - EP-001 / US-001
 Epic: Local infrastructure and Docker Compose bootstrap
@@ -34,4 +35,53 @@ Thread: CLI run
     - Avoid filling `docker-compose.yml` or runtime behavior during scaffold-only work, because those belong to later infrastructure stories.
   - Useful context
     - The backend package roots now exist as importable Python packages for follow-up stories.
+---
+
+## [2026-03-14 16:19:48 +0300] - EP-001 / US-002
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Implement Docker Compose services for the complete MVP stack
+Thread: CLI run
+- What was implemented
+  - Filled in `docker-compose.yml` with `postgres`, `redis`, `ollama`, `backend`, `worker`, `beat`, and `frontend` services wired for a one-command local stack startup.
+  - Added a minimal FastAPI app and Celery app so the backend, worker, and beat containers can boot cleanly before later backend stories flesh out real business logic.
+  - Added a frontend placeholder container and compose-focused pytest coverage, plus a small README runtime note for the current scaffold.
+- Files changed
+  - `docker-compose.yml`
+  - `.gitignore`
+  - `backend/Dockerfile`
+  - `backend/requirements.txt`
+  - `backend/app/main.py`
+  - `backend/app/workers/celery_app.py`
+  - `frontend/Dockerfile`
+  - `frontend/package.json`
+  - `frontend/package-lock.json`
+  - `frontend/index.html`
+  - `frontend/src/App.tsx`
+  - `frontend/src/main.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/static/index.html`
+  - `frontend/static/styles.css`
+  - `frontend/tsconfig.json`
+  - `frontend/vite.config.ts`
+  - `backend/tests/test_docker_compose.py`
+  - `backend/tests/__pycache__/test_docker_compose.cpython-314-pytest-9.0.2.pyc` (removed)
+  - `backend/tests/__pycache__/test_repository_layout.cpython-314-pytest-9.0.2.pyc` (removed)
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (3 passed)
+  - `docker compose config` ✅
+  - `docker compose up --build -d` + HTTP smoke checks for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:8080` ✅
+- PRD updates made
+  - Marked `US-002` as passed and added a durable note about the compose baseline and validation coverage.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the localhost-only port binding, fixed host data mounts, Ollama tuning, model init, and SPA proxying stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Compose stories benefit from a lightweight validation test plus a full startup smoke test, because static config checks alone miss container boot failures.
+  - Gotchas encountered
+    - PostgreSQL bind mounts under this workspace failed permission setup during `initdb`, so the bootstrap compose baseline uses named volumes until the dedicated storage-layout story revisits the exact host-path strategy.
+  - Useful context
+    - The placeholder backend health route lives at `backend/app/main.py`, and the Celery bootstrap shared by `worker` and `beat` lives at `backend/app/workers/celery_app.py`.
 ---
