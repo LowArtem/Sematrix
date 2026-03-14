@@ -92,6 +92,15 @@ class NoteService:
     def delete_note(self, note_id: UUID) -> None:
         self._note_repository.delete_note(note_id)
 
+    def reindex_note(self, note_id: UUID, *, request_id: str | None) -> NoteResult:
+        note = self._note_repository.reindex_note(note_id)
+        self._pipeline_dispatcher.start_pipeline(
+            note_id=note.id,
+            index_version=note.index_version,
+            request_id=request_id,
+        )
+        return self._to_result(note)
+
     def list_notes(
         self,
         q: str | None,

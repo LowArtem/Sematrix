@@ -38,6 +38,25 @@ def delete_note(note_id: UUID, service: NoteService = Depends(get_note_service))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@api_notes_router.post(
+    "/{note_id}/reindex",
+    response_model=AsyncAcceptedDto,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def reindex_note(
+    note_id: UUID,
+    request: Request,
+    service: NoteService = Depends(get_note_service),
+) -> AsyncAcceptedDto:
+    note = service.reindex_note(note_id, request_id=getattr(request.state, "request_id", None))
+    return AsyncAcceptedDto(
+        id=note.id,
+        status=note.status,
+        index_version=note.index_version,
+        message="Note reindex accepted and processing started",
+    )
+
+
 @api_notes_router.patch(
     "/{note_id}",
     response_model=NoteDetailDto | AsyncAcceptedDto,

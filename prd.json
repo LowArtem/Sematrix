@@ -441,8 +441,8 @@
             "Reindex respects DISABLE_LINK_FETCH, DISABLE_OCR, and DISABLE_IMAGE_CAPTION while still rebuilding search-document and embeddings"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec requires a dedicated reindex button and endpoint. Reindex always rebuilds the index base, even if enrichment stages are disabled."
+          "passes": true,
+          "notes": "The spec requires a dedicated reindex button and endpoint. Reindex always rebuilds the index base, even if enrichment stages are disabled. Added `POST /api/notes/{id}/reindex` through the existing note service/repository layers so manual reindex requests increment `index_version`, reset runtime error/warning state, set `status=Processing`, and enqueue the same `sematrix.start_pipeline` entrypoint with the current request id. The later orchestration stories remain responsible for honoring `DISABLE_*` flags inside `start_pipeline(...)` itself."
         },
         {
           "id": "US-029",
@@ -463,7 +463,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics."
+      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics. It still remains open because the tag listing and asset upload/retrieval stories are not finished yet."
     },
     {
       "id": "EP-005",

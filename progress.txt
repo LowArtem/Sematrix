@@ -56,8 +56,42 @@ Thread: CLI run
     - Database-driven cleanup paths in this repo should pair FK `ON DELETE` rules with ORM `passive_deletes=True` when relationships can be loaded during the same unit of work.
   - Gotchas encountered
     - Deleting a loaded `Note` without `passive_deletes=True` on `Note.links` makes SQLAlchemy try to null `note_links.note_id`, which breaks before the intended database cascade can run.
+- Useful context
+  - The delete path now removes orphan asset files only after the database commit succeeds, while shared assets survive as long as any `note_assets` row still points at them.
+---
+
+## [2026-03-14 20:11:07 +0300] - EP-004 / US-028
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement POST /api/notes/{id}/reindex as a separate manual entrypoint
+Thread: CLI run
+- What was implemented
+  - Added `POST /api/notes/{note_id}/reindex` in `backend/app/api/routes/notes.py`, returning `202 AsyncAcceptedDto` with the updated `index_version` and a dedicated reindex acceptance message.
+  - Extended `backend/app/domain/notes.py` and `backend/app/infra/notes.py` with a manual reindex flow that reloads the note, increments `index_version`, clears runtime error/warning state, sets `status=Processing`, and enqueues the existing `sematrix.start_pipeline` entrypoint with the current request id.
+  - Added `backend/tests/test_note_reindex_api.py` and a scratch-Postgres container smoke test that creates a Draft note, calls the new reindex endpoint, and verifies the note persists in `Processing` with the incremented version.
+- Files changed
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_reindex_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (46 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres redis` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... POST /api/notes + POST /api/notes/{id}/reindex smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-028` as passed and added a durable note about the manual reindex route, runtime-state reset, and reuse of the shared `sematrix.start_pipeline` entrypoint.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing and asset upload/retrieval stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing note-service/repository and pipeline-dispatch patterns.
+  - Gotchas encountered
+    - Manual reindex can reuse the existing pipeline dispatcher path directly, but the actual `DISABLE_*` stage selection still belongs in the later orchestration implementation behind `start_pipeline(...)`.
   - Useful context
-    - The delete path now removes orphan asset files only after the database commit succeeds, while shared assets survive as long as any `note_assets` row still points at them.
+    - `POST /api/notes/{id}/reindex` now works even for a Draft note and returns the short async contract immediately after moving the note into `Processing`.
 ---
 
 ## [2026-03-14 19:58:49 +0300] - EP-004 / US-026

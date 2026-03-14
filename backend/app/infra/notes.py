@@ -58,6 +58,8 @@ class NoteRepository(Protocol):
 
     def delete_note(self, note_id: UUID) -> None: ...
 
+    def reindex_note(self, note_id: UUID) -> NoteRecord: ...
+
     def save_note(
         self,
         *,
@@ -113,6 +115,27 @@ class SqlAlchemyNoteRepository:
 
         for storage_key in asset_storage_keys_to_delete:
             get_asset_path(storage_key).unlink(missing_ok=True)
+
+    def reindex_note(self, note_id: UUID) -> NoteRecord:
+        note = self._get_note_with_relations(note_id)
+        if note is None:
+            raise NotFoundError("Note not found")
+
+        note.index_version += 1
+        note.status = "Processing"
+        note.processing_error = None
+        note.has_warnings = False
+        note.warnings_count = 0
+        note.processing_warnings = []
+
+        self._session.add(note)
+        self._session.commit()
+
+        reindexed_note = self._get_note_with_relations(note_id)
+        if reindexed_note is None:
+            raise NotFoundError("Note not found")
+
+        return self._to_record(reindexed_note)
 
     def save_note(
         self,
