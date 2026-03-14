@@ -150,8 +150,8 @@
             "note_tags enforces uniqueness on (note_id, tag_id)"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes folders as a flat list, tags as normalized lowercase values without spaces, and notes as the single source of current note state."
+          "passes": true,
+          "notes": "The spec fixes folders as a flat list, tags as normalized lowercase values without spaces, and notes as the single source of current note state. Added typed SQLAlchemy models plus the initial Alembic schema for `folders`, `notes`, `tags`, and `note_tags`, enabled `pgvector`, and validated the migrated schema against a scratch PostgreSQL database."
         },
         {
           "id": "US-010",

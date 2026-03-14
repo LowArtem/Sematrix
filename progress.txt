@@ -8,6 +8,44 @@
 - When Ollama model compatibility outruns usable Docker tags, pin the official `ollama/ollama` image by digest in Compose so `ollama` and `ollama-init` stay reproducible while still matching the required model set.
 - Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
 - For database-foundation stories, verify `alembic upgrade head` against a freshly created scratch PostgreSQL database through `docker compose run --rm --no-deps backend ...` instead of trusting file-only migration scaffolding.
+- When an Alembic migration manually creates a PostgreSQL enum before table creation, use `postgresql.ENUM(..., create_type=False)` on the table column to avoid duplicate `CREATE TYPE` attempts during `op.create_table(...)`.
+
+## [2026-03-14 18:18:00 +0300] - EP-002 / US-009
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Enable pgvector and create folders, notes, tags, and note_tags tables
+Thread: CLI run
+- What was implemented
+  - Added typed SQLAlchemy models in `backend/app/infra/models.py` for `folders`, `notes`, `tags`, and `note_tags`, including the fixed note status enum, UUID identifiers, JSONB note content/warnings, `search_text`, generated `search_tsv`, and `VECTOR(1024)` embedding fields.
+  - Expanded the existing Alembic head revision to enable the `vector` extension and create the four core tables with the required folder-name/tag-name uniqueness and note-to-tag uniqueness through the composite primary key.
+  - Extended the lightweight migration guard tests so the repository now checks for the core schema model definitions and the migration contents without requiring host-side optional backend dependencies.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/env.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/requirements.txt`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_schema_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `vector` extension, `folders/notes/tags/note_tags` tables, core `notes` columns, and `note_tags` uniqueness ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-009` as passed and added a durable note about the new core schema models, the `pgvector` extension, and the scratch-database migration validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the assets, links, pipeline, and index-focused schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Manual Postgres enum creation in Alembic must be paired with `create_type=False` on the column enum to keep the migration idempotent within one revision run.
+  - Gotchas encountered
+    - Re-running migration validation after editing Alembic files requires rebuilding the `backend` image first, because `docker compose run` executes the code baked into the existing image.
+  - Useful context
+    - The current `notes` schema already carries the final RU+EN generated `search_tsv` expression and `VECTOR(1024)` column, so follow-up schema stories can focus on remaining tables and indices instead of reworking those core columns.
+---
 
 ## [2026-03-14 18:09:45 +0300] - EP-002 / US-008
 Epic: Database schema, pgvector, and migrations
