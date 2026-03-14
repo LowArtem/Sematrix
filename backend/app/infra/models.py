@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -53,6 +54,10 @@ class Folder(Base):
 
 class Note(Base):
     __tablename__ = "notes"
+    __table_args__ = (
+        Index("ix_notes_folder_id_updated_at_id", "folder_id", "updated_at", "id"),
+        Index("ix_notes_search_tsv", "search_tsv", postgresql_using="gin"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(
@@ -150,6 +155,7 @@ class Asset(Base):
 
 class NoteTag(Base):
     __tablename__ = "note_tags"
+    __table_args__ = (Index("ix_note_tags_tag_id_note_id", "tag_id", "note_id"),)
 
     note_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -165,6 +171,7 @@ class NoteTag(Base):
 
 class NoteAsset(Base):
     __tablename__ = "note_assets"
+    __table_args__ = (Index("ix_note_assets_asset_id_note_id", "asset_id", "note_id"),)
 
     note_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -236,7 +243,10 @@ class PipelineRun(Base):
 
 class AssetProcessingResult(Base):
     __tablename__ = "asset_processing_results"
-    __table_args__ = (UniqueConstraint("pipeline_run_id", "asset_id"),)
+    __table_args__ = (
+        UniqueConstraint("pipeline_run_id", "asset_id"),
+        Index("ix_asset_processing_results_note_id_index_version", "note_id", "index_version"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pipeline_run_id: Mapped[uuid.UUID] = mapped_column(
@@ -286,7 +296,10 @@ class AssetProcessingResult(Base):
 
 class LinkProcessingResult(Base):
     __tablename__ = "link_processing_results"
-    __table_args__ = (UniqueConstraint("pipeline_run_id", "link_id"),)
+    __table_args__ = (
+        UniqueConstraint("pipeline_run_id", "link_id"),
+        Index("ix_link_processing_results_note_id_index_version", "note_id", "index_version"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pipeline_run_id: Mapped[uuid.UUID] = mapped_column(

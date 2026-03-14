@@ -12,6 +12,43 @@
 - Create the scratch validation database explicitly inside the Compose Postgres service before running `alembic upgrade head`, since Alembic will not create the target PostgreSQL database for you.
 - Wait for `pg_isready` inside the Compose Postgres container before scratch-database `psql` setup, because the container may report as started before PostgreSQL accepts connections.
 - In SQLAlchemy declarative models, do not use `metadata` as a Python attribute name; map the database column with an alternate attribute such as `metadata_json = mapped_column("metadata", ...)`.
+- For schema/index stories, validate the final PostgreSQL indexes from `pg_indexes` against a scratch migrated database instead of assuming SQLAlchemy/Alembic declarations rendered exactly as intended.
+
+## [2026-03-14 18:39:23 +0300] - EP-002 / US-014
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Implement all required indices and generated search columns
+Thread: CLI run
+- What was implemented
+  - Added the required SQLAlchemy index declarations for note listing on `(folder_id, updated_at, id)`, the GIN-backed `notes.search_tsv`, reverse lookup support on `note_tags` and `note_assets`, and current-version lookup support on both processing-result tables.
+  - Expanded the existing Alembic head revision to create and drop those six required indexes while preserving the exact RU+EN STORED `search_tsv` expression already fixed in the schema.
+  - Extended the schema guard tests so the repository now checks for the new ORM and migration index declarations alongside the earlier generated-column coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... pg_isready` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_indexes_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_indexes_check backend alembic upgrade head` ✅
+  - PostgreSQL `pg_indexes` inspection for the six required listing/search/relation/result indexes ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-014` as passed and added a durable note about the required SQLAlchemy/Alembic indexes plus scratch-Postgres validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the `note_links` schema story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Scratch-database validation for schema/index work should inspect `pg_indexes` directly when acceptance criteria name exact PostgreSQL indexes.
+  - Gotchas encountered
+    - The join-table composite primary keys already cover `note_id`-leading lookups, so the extra relation-table indexes are most useful on the reverse `(tag_id, note_id)` and `(asset_id, note_id)` access paths.
+  - Useful context
+    - The exact RU+EN generated `search_tsv` expression was already in place from the earlier notes schema work, so this story only had to harden the index layer around that fixed search storage contract.
+---
 
 ## [2026-03-14 18:34:58 +0300] - EP-002 / US-013
 Epic: Database schema, pgvector, and migrations

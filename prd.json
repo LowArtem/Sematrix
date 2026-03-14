@@ -219,13 +219,13 @@
             "Indices exist on note_tags, note_assets, asset_processing_results(note_id, index_version), and link_processing_results(note_id, index_version)"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec forbids runtime to_tsvector calculation for search and forbids replacing RU+EN concatenation with a custom merged configuration or simple config."
+          "passes": true,
+          "notes": "The spec forbids runtime to_tsvector calculation for search and forbids replacing RU+EN concatenation with a custom merged configuration or simple config. Added the required SQLAlchemy and Alembic indexes for note listing, GIN-backed `search_tsv`, relation-table reverse lookups, and `(note_id, index_version)` access on version-aware result tables, then validated the rendered PostgreSQL indexes against a scratch database."
         }
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. `US-013` is now complete with durable asset/link processing result tables, but the epic still remains open because `note_links` and the remaining index-specific schema work are not finished yet."
+      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. `US-014` now locks in the required listing/search/result-table indexes and validates them against PostgreSQL, but the epic still remains open because `note_links` is not finished yet."
     },
     {
       "id": "EP-003",

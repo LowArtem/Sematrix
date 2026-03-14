@@ -370,8 +370,52 @@ def upgrade() -> None:
         ),
     )
 
+    op.create_index(
+        op.f("ix_notes_folder_id_updated_at_id"),
+        "notes",
+        ["folder_id", "updated_at", "id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_notes_search_tsv"),
+        "notes",
+        ["search_tsv"],
+        unique=False,
+        postgresql_using="gin",
+    )
+    op.create_index(
+        op.f("ix_note_tags_tag_id_note_id"),
+        "note_tags",
+        ["tag_id", "note_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_note_assets_asset_id_note_id"),
+        "note_assets",
+        ["asset_id", "note_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_asset_processing_results_note_id_index_version"),
+        "asset_processing_results",
+        ["note_id", "index_version"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_link_processing_results_note_id_index_version"),
+        "link_processing_results",
+        ["note_id", "index_version"],
+        unique=False,
+    )
+
 
 def downgrade() -> None:
+    op.drop_index(op.f("ix_link_processing_results_note_id_index_version"), table_name="link_processing_results")
+    op.drop_index(op.f("ix_asset_processing_results_note_id_index_version"), table_name="asset_processing_results")
+    op.drop_index(op.f("ix_note_assets_asset_id_note_id"), table_name="note_assets")
+    op.drop_index(op.f("ix_note_tags_tag_id_note_id"), table_name="note_tags")
+    op.drop_index(op.f("ix_notes_search_tsv"), table_name="notes")
+    op.drop_index(op.f("ix_notes_folder_id_updated_at_id"), table_name="notes")
     op.drop_table("link_processing_results")
     op.drop_table("asset_processing_results")
     op.drop_table("pipeline_runs")
