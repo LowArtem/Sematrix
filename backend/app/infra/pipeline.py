@@ -30,6 +30,7 @@ from app.infra.link_fetcher import LinkFetchError, SafeLinkFetcher
 from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
 from app.infra.ocr import OcrClientError, PaddleOcrClient
 from app.infra.ollama import OllamaClient, OllamaClientError
+from app.infra.web_pages import extract_main_text
 from app.infra.youtube import YouTubeDataApiClient, YouTubeDataApiClientError
 from app.workers.celery_app import celery_app
 
@@ -150,6 +151,7 @@ class HtmlMetadataParser(HTMLParser):
 
 _CHARSET_RE = re.compile(r"charset=([A-Za-z0-9._-]+)", re.IGNORECASE)
 _TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml"})
+_HTML_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 _TEXT_SUMMARY_PREVIEW_CHARS = 16000
 
 
@@ -201,6 +203,11 @@ def _is_text_file_content_type(content_type: str | None) -> bool:
     return media_type.startswith("text/") and media_type != "text/html"
 
 
+def _is_html_content_type(content_type: str | None) -> bool:
+    media_type = _normalize_content_type(content_type)
+    return media_type in _HTML_CONTENT_TYPES
+
+
 def _build_text_file_summary_fallback(*, source_name: str, content_text: str) -> str:
     normalized_text = " ".join(content_text.split())
     if not normalized_text:
@@ -209,6 +216,30 @@ def _build_text_file_summary_fallback(*, source_name: str, content_text: str) ->
     if len(normalized_text) > 240:
         preview = f"{preview}..."
     return f'Text file "{source_name}": {preview}'
+
+
+def _build_web_page_summary_fallback(
+    *,
+    page_title: str,
+    meta_description: str,
+    extracted_text: str,
+    url: str,
+) -> str:
+    normalized_description = " ".join(meta_description.split())
+    if normalized_description:
+        preview = normalized_description[:240].rstrip()
+        if len(normalized_description) > 240:
+            preview = f"{preview}..."
+    else:
+        normalized_text = " ".join(extracted_text.split())
+        preview = normalized_text[:240].rstrip()
+        if len(normalized_text) > 240:
+            preview = f"{preview}..."
+
+    title = page_title.strip()
+    if title:
+        return f'Web page "{title}": {preview or url}'
+    return f"Web page {url}: {preview or 'processed successfully.'}"
 
 
 class PipelineRuntimeRepository(Protocol):
@@ -1074,7 +1105,7 @@ class PipelineStageRunner:
                 )
                 continue
 
-            if link.link_type not in {"youtube_video", "youtube_channel", "text_file"}:
+            if link.link_type not in {"youtube_video", "youtube_channel", "text_file", "web"}:
                 skipped_count += 1
                 self._log_target_skip(
                     stage_name="process_links",
@@ -1116,7 +1147,7 @@ class PipelineStageRunner:
                             warnings,
                             content_type,
                         ) = self._process_youtube_channel_link(url=link.url)
-                    else:
+                    elif link.link_type == "text_file":
                         (
                             page_title,
                             extracted_text,
@@ -1126,6 +1157,16 @@ class PipelineStageRunner:
                             warnings,
                             content_type,
                         ) = self._process_text_file_link(url=link.url)
+                    else:
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_web_link(url=link.url)
             except (LinkFetchError, YouTubeDataApiClientError) as exc:
                 warnings = [
                     build_processing_warning(
@@ -1275,6 +1316,71 @@ class PipelineStageRunner:
         }
         return (
             source_name,
+            extracted_text,
+            generated_summary,
+            metadata_json,
+            "done",
+            warnings,
+            content_type,
+        )
+
+    def _process_web_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(f"Web page fetch failed for {url}: HTTP {response.status_code}")
+
+        content_type = response.content_type
+        normalized_content_type = _normalize_content_type(content_type)
+        if normalized_content_type and not _is_html_content_type(content_type):
+            raise LinkFetchError(f"Link did not resolve to an HTML page: {url}")
+
+        decoded_body = _decode_link_body(response.body, content_type=content_type)
+        page_title, meta_description = _extract_html_metadata(decoded_body)
+        extracted_text = extract_main_text(html=decoded_body)
+        if not extracted_text:
+            raise LinkFetchError(f"Web page extraction returned no main text for {url}")
+
+        page_title = page_title or _extract_link_source_name(response.final_url)
+        warnings: list[dict[str, object]] = []
+        try:
+            generated_summary = self._ollama_client.generate_web_page_summary(
+                page_title=page_title,
+                page_text=extracted_text[:_TEXT_SUMMARY_PREVIEW_CHARS],
+            )
+        except OllamaClientError as exc:
+            generated_summary = _build_web_page_summary_fallback(
+                page_title=page_title,
+                meta_description=meta_description,
+                extracted_text=extracted_text,
+                url=response.final_url,
+            )
+            warnings = [
+                build_processing_warning(
+                    stage="link_summary",
+                    target=url,
+                    code="web_page_summary_failed",
+                    message=str(exc),
+                    retryable=False,
+                )
+            ]
+
+        metadata_json = {
+            "source": "web_page",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "content_type": response.content_type,
+            "page_title": page_title,
+            "meta_description": meta_description,
+            "extractor": "trafilatura_then_readability",
+        }
+        return (
+            page_title,
             extracted_text,
             generated_summary,
             metadata_json,

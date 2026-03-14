@@ -78,6 +78,21 @@ class OllamaClient:
             raise OllamaClientError("Ollama generate response did not include text")
         return response_text.strip()
 
+    def generate_web_page_summary(self, *, page_title: str, page_text: str) -> str:
+        prompt = (
+            "/no_think\n"
+            "Write a short plain-text summary for a fetched web page. "
+            "Return only 1-2 concise sentences with no bullets or labels.\n\n"
+            f"Title: {page_title or '(unknown)'}\n"
+            "Extracted text:\n"
+            f"{page_text}"
+        )
+        payload = self._generate_text(prompt=prompt)
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
     def generate_title(self, *, content_text_flat: str, tag_names: list[str]) -> str:
         tags_block = ", ".join(tag_names) if tag_names else "none"
         prompt = (

@@ -42,6 +42,7 @@
 - Keep YouTube Data API calls in `app/infra/youtube.py`, and persist both structured metadata plus derived index text/summary on `link_processing_results` so finalization can consume official API output without HTML scraping.
 - For `youtube_channel` links, keep the YouTube Data API as the default path and use the shared SSRF-safe fetcher only for retryable API-failure fallback, recording that downgrade as a warning instead of changing the primary integration design.
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
+- Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046
 Epic: Image OCR/caption and secure link processing
@@ -75,6 +76,45 @@ Thread: CLI run
     - The global fetcher body cap is not enough by itself for this story; the text-file stage still needs its own `MAX_TEXT_FILE_MB` guard so the per-resource rule stays explicit.
   - Useful context
     - `sematrix.process_links` now has first-class support for `text_file` links, but ordinary `web` links still intentionally wait for the later main-text extraction story.
+---
+
+## [2026-03-15 01:44:11 +0300] - EP-006 / US-047
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement generic webpage processing with main-text extraction and link summary
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/web_pages.py` so generic web-page extraction now uses trafilatura first with readability-lxml fallback for main-text extraction.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now processes `web` snapshot links through the shared SSRF-safe fetcher, persists page-title/main-text metadata on `link_processing_results`, and falls back to a warning-backed heuristic summary when the non-thinking Ollama web summary call fails.
+  - Added `backend/app/infra/ollama.py` support for non-thinking web-page summaries, updated the existing source-guard tests that inspect the supported link-type set, added `backend/tests/test_pipeline_web_page_stage.py`, and refreshed `AGENTS.md` with the reusable webpage-processing rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/web_pages.py`
+  - `backend/requirements.txt`
+  - `backend/tests/test_pipeline_text_file_stage.py`
+  - `backend/tests/test_pipeline_web_page_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_web_page_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (118 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python - <<'PY' ... PipelineStageRunner web-link smoke test with fake fetcher/repository/Ollama client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-047` as passed and added a durable note about SSRF-safe webpage fetching, trafilatura/readability main-text extraction, durable link-result persistence, and non-thinking summary generation with heuristic fallback.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the warning-surface story `US-048` is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep generic webpage link handling on the shared safe fetcher, then let a dedicated infra extractor try trafilatura before readability-lxml so later link-stage changes do not duplicate HTML parsing logic.
+  - Gotchas encountered
+    - Existing source-guard tests that assert the supported `process_links` types need updating whenever the allowed link-type set grows, or unrelated link-stage stories can fail the full pytest suite.
+  - Useful context
+    - `sematrix.process_links` now handles `web` links alongside YouTube and text files, while single-link warning persistence still waits for the remaining `US-048` story.
 ---
 
 ## [2026-03-15 01:27:35 +0300] - EP-006 / US-045

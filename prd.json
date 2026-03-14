@@ -748,8 +748,8 @@
             "If the summary is LLM-generated, qwen3.5:9b runs in non-thinking mode"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The stack section explicitly fixes trafilatura/readability-lxml for web-page main-text extraction."
+          "passes": true,
+          "notes": "The stack section explicitly fixes trafilatura/readability-lxml for web-page main-text extraction. `sematrix.process_links` now processes `web` snapshot links through the shared SSRF-safe fetcher, extracts page title plus main text via a dedicated `app.infra.web_pages` helper that tries trafilatura before readability-lxml, persists the extracted text and source metadata on `link_processing_results`, and generates a non-thinking Ollama summary with a warning-backed heuristic fallback when summary generation fails."
         },
         {
           "id": "US-048",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, and text-file link processing are now in place, but the generic webpage-processing and warning-surface stories are still open."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, text-file link processing, and generic webpage processing are now in place, but the warning-surface story is still open."
     },
     {
       "id": "EP-007",
