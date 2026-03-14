@@ -4,6 +4,39 @@
 - For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered `docker compose config` output in tests.
 - For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
 - For Ollama GPU passthrough in this repo, prefer `deploy.resources.reservations.devices` over a top-level `gpus` key because the current Compose validator rejects `services.<name>.gpus` during `docker compose config`.
+- For automatic Ollama model availability, use a one-shot `ollama-init` service that shares `./data/ollama`, waits for the API, and gates model-dependent services with `condition: service_completed_successfully`.
+
+## [2026-03-14 16:41:42 +0300] - EP-001 / US-006
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Add automatic model initialization for the required local models
+Thread: CLI run
+- What was implemented
+  - Added a one-shot `ollama-init` Compose service that waits for the local Ollama API and automatically ensures `qwen3.5:9b` and `bge-m3` are present in the shared model cache.
+  - Gated `backend`, `worker`, and `beat` startup on successful completion of the model init service so the local stack comes up with the required models ready.
+  - Added Compose test coverage for the init service configuration and documented the automatic model bootstrapping behavior in the README.
+- Files changed
+  - `scripts/ollama-init.sh`
+  - `docker-compose.yml`
+  - `backend/tests/test_docker_compose.py`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (7 passed)
+  - `docker compose config` ✅
+  - `docker compose config --services` ✅
+- PRD updates made
+  - Marked `US-006` as passed and added a durable note about the one-shot `ollama-init` flow plus the startup gating for model-dependent services.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the SPA runtime proxy story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Compose can gate dependent services on a one-shot initializer with `condition: service_completed_successfully` when startup must prepare shared runtime state first.
+  - Gotchas encountered
+    - The Ollama init flow needs the shared `./data/ollama` bind mount so downloaded models persist across restarts and remain visible to the main `ollama` service.
+  - Useful context
+    - The init script lives at `scripts/ollama-init.sh` and defaults to the required MVP model list unless `OLLAMA_INIT_MODELS` is overridden.
+---
 
 ## [2026-03-14 16:38:38 +0300] - EP-001 / US-005
 Epic: Local infrastructure and Docker Compose bootstrap

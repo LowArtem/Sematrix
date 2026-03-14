@@ -92,8 +92,8 @@
             "No manual model pulling step is required beyond running the documented startup command"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec requires automatic model availability and explicitly names qwen3.5:9b and bge-m3 as the MVP model set."
+          "passes": true,
+          "notes": "The spec requires automatic model availability and explicitly names qwen3.5:9b and bge-m3 as the MVP model set. Added a one-shot `ollama-init` compose service that waits for the Ollama API, reuses the shared `./data/ollama` cache, pulls both required models, and gates backend/worker/beat startup through `service_completed_successfully` so the stack comes up with the models ready."
         },
         {
           "id": "US-007",
@@ -111,7 +111,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. EP-001 remains open until automatic Ollama model initialization and SPA runtime proxying are implemented."
+      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. EP-001 remains open until the SPA runtime proxy story is implemented."
     },
     {
       "id": "EP-002",

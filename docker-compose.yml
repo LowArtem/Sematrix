@@ -42,6 +42,20 @@ services:
     volumes:
       - ./data/ollama:/root/.ollama
 
+  ollama-init:
+    image: ollama/ollama:0.11.10
+    entrypoint: ["sh", "/scripts/ollama-init.sh"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_INIT_MODELS: qwen3.5:9b bge-m3
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: "no"
+    volumes:
+      - ./data/ollama:/root/.ollama
+      - ./scripts:/scripts:ro
+
   backend:
     build:
       context: .
@@ -59,6 +73,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
       - ./data/assets:/data/assets
     ports:
@@ -83,6 +99,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
       - ./data/assets:/data/assets
 
@@ -103,6 +121,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
       - ./data/assets:/data/assets
 
