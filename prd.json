@@ -301,13 +301,13 @@
             "The logging format supports later trace reconstruction for one note processing run"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The spec requires structured logs with request_id for API and task_id for Celery. Timing logs are implemented in the pipeline epic, not here."
+          "passes": true,
+          "notes": "The spec requires structured logs with request_id for API and task_id for Celery. Timing logs are implemented in the pipeline epic, not here. Added centralized JSON logging helpers in `app.core.logging`, bound `X-Request-Id` through API middleware, and bound Celery `task_id` plus optional note/version context through worker bootstrap signals so API and task logs share one structured format."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton, shared ENV-driven settings layer, unified API error format, and public DTO contracts now follow the required foundation constraints, but the structured logging story is still open."
+      "passes": true,
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton, shared ENV-driven settings layer, unified API error format, public DTO contracts, and centralized structured logging now satisfy the backend foundation acceptance criteria."
     },
     {
       "id": "EP-004",

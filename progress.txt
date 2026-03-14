@@ -17,6 +17,46 @@
 - Keep Celery tasks in dedicated `app/workers` modules registered via the Celery app, and keep host-side backend-foundation tests source-based when they only need to verify architectural wiring.
 - Keep backend ENV parsing centralized in `app/core/config.py` and have FastAPI/Celery bootstrap code consume shared settings there instead of scattering raw `os.getenv(...)` calls across entrypoints.
 - Keep FastAPI error shaping centralized in `app/api/errors.py`; register global handlers from app bootstrap so 404/409/413/415/422/500 responses and validation payloads stay in one `ApiErrorDto` format.
+- Keep structured logging context centralized in `app/core/logging.py`; bind API `X-Request-Id` in middleware and Celery `task_id` in worker bootstrap so route/task code can stay focused on domain work.
+
+## [2026-03-14 19:16:13 +0300] - EP-003 / US-019
+Epic: Backend application skeleton, configuration, and API contracts
+Epic Branch: ralph/sematrix-mvp/ep-003-backend-foundation
+Story: Add request_id and task_id aware structured logging
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/core/logging.py` with centralized JSON logging, contextvars-backed request/task context binding, and shared logger helpers for backend cross-cutting concerns.
+  - Added `backend/app/api/middleware.py` and registered it from `backend/app/main.py` so API requests bind `X-Request-Id`, emit structured start/finish events, and echo the correlation header back on responses.
+  - Updated `backend/app/workers/celery_app.py` and `backend/app/workers/tasks.py` so Celery logs keep `task_id` in context through task lifecycle signals while worker tasks stay thin and domain-driven.
+  - Added source-based guard tests for the logging wiring and container smoke checks that exercised both API request correlation and Celery task correlation.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/middleware.py`
+  - `backend/app/core/__init__.py`
+  - `backend/app/core/logging.py`
+  - `backend/app/main.py`
+  - `backend/app/workers/celery_app.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_structured_logging.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (25 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "from app.main import create_app; from app.workers.tasks import ping; ... ping.apply() ..."` ✅
+  - `docker compose run --rm --no-deps backend python -c "...ASGI request to /api/health with X-Request-Id..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-019` as passed and added a durable note about the centralized logging helpers, API middleware correlation, and Celery task-context binding.
+  - Re-evaluated `EP-003`; all nested stories and epic-level backend foundation acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep structured logging context centralized in `app/core/logging.py` so API middleware and Celery bootstrap can bind correlation IDs without pushing logging plumbing into handlers.
+  - Gotchas encountered
+    - Rebuild the `backend` image before container smoke checks after Python source edits, or Docker may still execute stale task/logging code from the prior image layer.
+  - Useful context
+    - API request logs now emit `api_request_started`/`api_request_finished`, while worker execution emits `task_started`/`task_finished` and preserves `task_id` on task-level logs automatically.
+---
 
 ## [2026-03-14 18:59:47 +0300] - EP-003 / US-016
 Epic: Backend application skeleton, configuration, and API contracts
