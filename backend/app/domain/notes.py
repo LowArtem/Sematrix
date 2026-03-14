@@ -6,6 +6,7 @@ import re
 from typing import Any, Protocol
 from uuid import UUID
 
+from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
 from app.domain.errors import NotFoundError
 from app.domain.tags import normalize_tag_names
@@ -134,6 +135,11 @@ class NoteService:
         request_id: str | None,
     ) -> NoteSaveOutcome:
         parsed_content = parse_note_content(content_json)
+        should_start_processing = has_meaningful_content(
+            content_text_flat=parsed_content.content_text_flat,
+            asset_count=len(parsed_content.asset_ids),
+            link_count=len(parsed_content.links),
+        )
         save_result = self._note_repository.save_note(
             note_id=note_id,
             title=title.strip(),
@@ -143,6 +149,7 @@ class NoteService:
             content_text_flat=parsed_content.content_text_flat,
             asset_ids=parsed_content.asset_ids,
             links=parsed_content.links,
+            should_start_processing=should_start_processing,
         )
 
         if save_result.pipeline_started:

@@ -71,6 +71,7 @@ class NoteRepository(Protocol):
         content_text_flat: str,
         asset_ids: list[UUID],
         links: list[ExtractedLink],
+        should_start_processing: bool,
     ) -> SaveNoteRecord: ...
 
     def list_notes(
@@ -148,6 +149,7 @@ class SqlAlchemyNoteRepository:
         content_text_flat: str,
         asset_ids: list[UUID],
         links: list[ExtractedLink],
+        should_start_processing: bool,
     ) -> SaveNoteRecord:
         note = self._get_note_with_relations(note_id)
         if note is None:
@@ -168,8 +170,7 @@ class SqlAlchemyNoteRepository:
         self._sync_note_links(note=note, links=links)
         note.updated_at = datetime.now(timezone.utc)
 
-        pipeline_started = bool(content_text_flat.strip() or assets or links)
-        if pipeline_started:
+        if should_start_processing:
             note.index_version += 1
             note.status = "Processing"
             note.processing_error = None
@@ -186,7 +187,7 @@ class SqlAlchemyNoteRepository:
         if saved_note is None:
             raise NotFoundError("Note not found")
 
-        return SaveNoteRecord(note=self._to_record(saved_note), pipeline_started=pipeline_started)
+        return SaveNoteRecord(note=self._to_record(saved_note), pipeline_started=should_start_processing)
 
     def list_notes(
         self,

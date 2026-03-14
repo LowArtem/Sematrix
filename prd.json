@@ -487,8 +487,8 @@
             "The same rule is used for both new Draft notes and notes that are saved after being emptied"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Section 4.6.1 defines the exact Draft -> Processing criterion and explicitly forbids starting background work for empty Drafts."
+          "passes": true,
+          "notes": "Section 4.6.1 defines the exact Draft -> Processing criterion and explicitly forbids starting background work for empty Drafts. Centralized the meaningful-save rule in `app.domain.note_lifecycle.has_meaningful_content(...)` and wired note save to reuse it before persistence so whitespace-only saves stay Draft while text/asset/http(s)-link saves alone can start Processing."
         },
         {
           "id": "US-031",

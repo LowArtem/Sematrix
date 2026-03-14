@@ -22,9 +22,45 @@
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
+- Keep the Draft-versus-Processing decision in a shared domain helper so save flows and later Draft-cleanup logic can reuse the exact meaningful-content rule.
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
 - For file-backed asset uploads, validate MIME/size in the domain service and unlink the just-written file on database rollback so `./data/assets` stays consistent with `assets` and `note_assets`.
 - For `GET /api/tags`, keep tag counting in the repository via an outer join on `note_tags`, and when `q` is present use ordering that moves substring matches first without filtering the non-matching tags out of the paginated result set.
+
+## [2026-03-14 20:31:16 +0300] - EP-005 / US-030
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement meaningful-content detection and Draft preservation rules
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/domain/note_lifecycle.py` with a shared `has_meaningful_content(...)` helper that encodes the fixed Save rule: only non-whitespace flattened text, at least one asset, or at least one extracted http/https link can move a note into `Processing`.
+  - Updated `backend/app/domain/notes.py` and `backend/app/infra/notes.py` so note saves compute the meaningful-content decision in the domain layer, pass that explicit boolean into persistence, and keep whitespace-only saves in `Draft` without dispatching the pipeline.
+  - Added `backend/tests/test_note_meaningful_content.py` plus updated source guards in `backend/tests/test_note_save_api.py`, and validated the behavior against a scratch PostgreSQL database by saving a note through empty -> meaningful -> empty transitions.
+- Files changed
+  - `backend/app/domain/note_lifecycle.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_meaningful_content.py`
+  - `backend/tests/test_note_save_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (56 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python -c "... NoteService empty -> meaningful -> empty save smoke test ..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-030` as passed and added a durable note about the shared meaningful-content helper and the explicit save-time Draft-versus-Processing decision.
+  - Re-evaluated `EP-005`; it remains `passes: false` because the pipeline snapshot, orchestration, finalization, failure-handling, cleanup, and related lifecycle stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the Draft-versus-Processing rule in one pure domain helper so save, cleanup, and future lifecycle code cannot drift on what counts as meaningful note content.
+  - Gotchas encountered
+    - `title` alone must not count as meaningful content; Save should still stay `Draft` unless flattened text, assets, or extracted http/https links are present.
+  - Useful context
+    - An emptied note now returns to `Draft` without bumping `index_version` or dispatching `sematrix.start_pipeline`; the later reset-of-derived-fields story still needs to clear stale indexed data.
+---
 
 ## [2026-03-14 20:18:35 +0300] - EP-004 / US-029
 Epic: Folders, tags, assets, and note CRUD domain flows
