@@ -170,6 +170,7 @@ Do not move business logic into route handlers or UI code.
 When handling links:
 
 - Only `http` / `https` are allowed.
+- Normalize saved note URLs before snapshotting them by removing fragments/default ports, lowercasing scheme + host, and sorting query params so duplicate links inside one note collapse to one `normalized_url`.
 - Only public resources are allowed.
 - Requests to localhost, loopback, private, link-local, or otherwise internal IP ranges must be blocked.
 - DNS resolution and redirect validation must be part of the safety model.

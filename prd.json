@@ -678,8 +678,8 @@
             "Per-note duplicate normalized URLs can be avoided or collapsed according to the schema rule"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Link extraction happens before the pipeline starts because note_links is part of the snapshot. User-entered links may exist as plain text or as link marks."
+          "passes": true,
+          "notes": "Link extraction happens before the pipeline starts because note_links is part of the snapshot. User-entered links may exist as plain text or as link marks. `app.domain.note_content` now extracts `http/https` links from both text nodes and Tiptap link marks during Save, normalizes them by lowercasing scheme/host, removing fragments/default ports, and sorting query params for per-note deduplication, and classifies the saved links into the required `youtube_video`, `youtube_channel`, `text_file`, `web`, and `other` types before `note_links` sync runs."
         },
         {
           "id": "US-043",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, and save-time note-link extraction/classification are now in place, but the SSRF-safe fetcher, YouTube metadata retrieval, webpage/text processing, and warning-surface stories are still open."
     },
     {
       "id": "EP-007",

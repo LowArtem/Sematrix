@@ -10,6 +10,52 @@ from app.domain.errors import DomainError
 
 
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+TEXT_FILE_EXTENSIONS = {
+    ".csv",
+    ".json",
+    ".log",
+    ".md",
+    ".rst",
+    ".text",
+    ".toml",
+    ".tsv",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+WEB_PAGE_EXTENSIONS = {"", ".asp", ".aspx", ".cfm", ".cgi", ".htm", ".html", ".jsp", ".php"}
+OTHER_FILE_EXTENSIONS = {
+    ".7z",
+    ".avif",
+    ".bmp",
+    ".doc",
+    ".docx",
+    ".epub",
+    ".gif",
+    ".gz",
+    ".jpeg",
+    ".jpg",
+    ".m4a",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".odt",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".rar",
+    ".rtf",
+    ".svg",
+    ".tar",
+    ".wav",
+    ".webm",
+    ".webp",
+    ".xls",
+    ".xlsx",
+    ".zip",
+}
 
 
 @dataclass(frozen=True)
@@ -125,7 +171,10 @@ def normalize_note_url(raw_url: str) -> str | None:
     else:
         netloc = f"{hostname}:{port}"
 
-    normalized_query = urlencode(parse_qsl(parsed.query, keep_blank_values=True), doseq=True)
+    normalized_query = urlencode(
+        sorted(parse_qsl(parsed.query, keep_blank_values=True)),
+        doseq=True,
+    )
     return urlunparse((scheme, netloc, parsed.path or "", "", normalized_query, ""))
 
 
@@ -133,17 +182,33 @@ def classify_note_link(normalized_url: str) -> str:
     parsed = urlparse(normalized_url)
     hostname = (parsed.hostname or "").lower()
     path = parsed.path or ""
+    path_lower = path.lower()
+    path_segments = [segment for segment in path_lower.split("/") if segment]
+    extension = ""
+    if path_segments and "." in path_segments[-1]:
+        extension = f".{path_segments[-1].rsplit('.', 1)[-1]}"
 
     if hostname in {"youtu.be", "www.youtu.be"}:
         return "youtube_video"
 
     if hostname in {"youtube.com", "www.youtube.com", "m.youtube.com"}:
-        if path == "/watch" and parsed.query:
+        if path_lower in {"/watch", "/live"} and parsed.query:
             return "youtube_video"
-        if path.startswith("/channel/") or path.startswith("/@"):
+        if path_lower.startswith(("/shorts/", "/embed/", "/live/")):
+            return "youtube_video"
+        if path_lower.startswith(("/channel/", "/@", "/c/", "/user/")):
             return "youtube_channel"
 
-    if path.lower().endswith(".txt"):
+    if extension in TEXT_FILE_EXTENSIONS:
         return "text_file"
+
+    if extension in OTHER_FILE_EXTENSIONS:
+        return "other"
+
+    if extension in WEB_PAGE_EXTENSIONS:
+        return "web"
+
+    if extension:
+        return "other"
 
     return "web"

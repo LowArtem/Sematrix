@@ -37,6 +37,37 @@
 - Keep save-time title and fast-summary generation behind an injected `app/infra/ollama.py` client in `NoteService`, so meaningful saves can prefill card data and persist non-fatal generation warnings while tests swap in fakes without touching route handlers.
 - Keep OCR calls in `app/infra/ocr.py`, and have OCR/caption stages update only their own columns plus stage-specific warnings on shared `asset_processing_results` rows so reruns do not erase sibling stage outputs.
 - Keep image caption generation in `app/infra/ollama.py` and inject that client into `PipelineStageRunner`, so `process_image_caption` can reuse the configured vision model while tests swap in fakes without moving caption logic into Celery tasks.
+- Normalize extracted note URLs before syncing `note_links` by lowercasing scheme/host, removing fragments/default ports, and sorting query params so plain-text URLs and link marks collapse onto the same `normalized_url`.
+
+## [2026-03-15 01:03:10 +0300] - EP-006 / US-042
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement link extraction and classification from note content
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/domain/note_content.py` so Save-time parsing now normalizes extracted `http/https` URLs more aggressively for per-note deduplication, including sorted query params plus stripped fragments/default ports.
+  - Expanded link classification to cover the required `youtube_video`, `youtube_channel`, `text_file`, `web`, and `other` values from note content before `note_links` synchronization runs.
+  - Added `backend/tests/test_note_content.py` with unit coverage for text-node URLs, Tiptap link marks, duplicate normalized URLs, required link-type classification, and invalid `assetId` rejection.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/note_content.py`
+  - `backend/tests/test_note_content.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_content.py` ✅
+  - `python -m pytest` ✅ (94 passed)
+- PRD updates made
+  - Marked `US-042` as passed and added a durable note about Save-time extraction from both plain text and link marks, normalized-url deduplication, and required link-type classification.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the SSRF-safe fetcher, YouTube metadata, webpage/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Normalize extracted note URLs before syncing `note_links`, or the same user-entered link can survive twice when it appears once as plain text and once as a link mark with reordered query params.
+  - Gotchas encountered
+    - The `link_type` enum includes `other`, so extension-based binary/document links should not silently fall through to `web` when they are clearly non-page resources.
+  - Useful context
+    - `parse_note_content(...)` remains the single Save-time source for flattened text, `assetId` extraction, and note-link extraction/classification, so later link-processing stages can trust the snapshot rows created from `note_links`.
+---
 
 ## [2026-03-15 00:58:16 +0300] - EP-006 / US-041
 Epic: Image OCR/caption and secure link processing
