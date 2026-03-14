@@ -1,14 +1,13 @@
 from fastapi import FastAPI
 
-
-app = FastAPI(title="Sematrix API")
-
-
-@app.get("/")
-def read_root() -> dict[str, str]:
-    return {"service": "sematrix-backend"}
+from app.api.router import api_router, public_router
 
 
-@app.get("/api/health")
-def read_health() -> dict[str, str]:
-    return {"status": "ok"}
+def create_app() -> FastAPI:
+    app = FastAPI(title="Sematrix API")
+    app.include_router(public_router)
+    app.include_router(api_router)
+    return app
+
+
+app = create_app()

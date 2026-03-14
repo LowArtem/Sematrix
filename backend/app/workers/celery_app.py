@@ -7,6 +7,7 @@ celery_app = Celery(
     "sematrix",
     broker=os.getenv("REDIS_URL", "redis://redis:6379/0"),
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1"),
+    include=["app.workers.tasks"],
 )
 
 celery_app.conf.update(
@@ -14,8 +15,3 @@ celery_app.conf.update(
     timezone="UTC",
     beat_schedule={},
 )
-
-
-@celery_app.task(name="sematrix.ping")
-def ping() -> str:
-    return "pong"

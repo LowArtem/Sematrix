@@ -249,8 +249,8 @@
             "Worker code calls domain services instead of embedding business rules inside Celery tasks"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The architecture section explicitly fixes the api -> domain -> infra layering and the role of app/workers."
+          "passes": true,
+          "notes": "The architecture section explicitly fixes the api -> domain -> infra layering and the role of app/workers. Added a `create_app()` entrypoint that wires routers through `app/api`, moved system behavior into domain and infra services, and registered Celery tasks from `app/workers/tasks.py` so worker entrypoints stay thin and call domain services."
         },
         {
           "id": "US-016",
@@ -307,7 +307,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API."
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton now follows the required api -> domain -> infra split, but the configuration, unified error format, public DTO, and structured logging stories are still open."
     },
     {
       "id": "EP-004",

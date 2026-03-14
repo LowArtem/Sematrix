@@ -58,6 +58,11 @@ Preferred repo shape:
 - `backend/app/workers` — Celery entrypoints that call domain services
 - `frontend/` — SPA
 
+Backend foundation convention:
+
+- Keep Celery tasks in dedicated modules under `backend/app/workers`; `celery_app.py` should register those modules and stay focused on Celery configuration.
+- Keep worker task bodies thin and delegate business behavior to `backend/app/domain` services.
+
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.
 
