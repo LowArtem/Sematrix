@@ -6,6 +6,7 @@
     {
       "id": "EP-001",
       "title": "Local infrastructure and Docker Compose bootstrap",
+      "branchName": "ralph/sematrix-mvp/ep-001-local-infra-bootstrap",
       "description": "Create the repository skeleton and the Docker Compose runtime so the whole MVP starts locally on one machine with one command, uses only localhost-exposed UI/API ports, and persists all required data under ./data.",
       "acceptanceCriteria": [
         "The repository contains the required top-level structure from the specification: backend/, frontend/, scripts/, infra/, docker-compose.yml, README.md",
@@ -115,6 +116,7 @@
     {
       "id": "EP-002",
       "title": "Database schema, pgvector, and migrations",
+      "branchName": "ralph/sematrix-mvp/ep-002-db-schema-pgvector",
       "description": "Create the exact MVP PostgreSQL schema with SQLAlchemy 2.x and Alembic, including pgvector support, generated full-text columns, version-aware pipeline tables, and required indices.",
       "acceptanceCriteria": [
         "Alembic migrations reproduce the complete MVP schema from an empty database",
@@ -228,6 +230,7 @@
     {
       "id": "EP-003",
       "title": "Backend application skeleton, configuration, and API contracts",
+      "branchName": "ralph/sematrix-mvp/ep-003-backend-foundation",
       "description": "Implement the FastAPI application foundation, layered backend structure, unified configuration via ENV, API DTOs, and structured logging required by the MVP.",
       "acceptanceCriteria": [
         "Backend code follows the api -> domain -> infra layer split from the specification",
@@ -309,6 +312,7 @@
     {
       "id": "EP-004",
       "title": "Folders, tags, assets, and note CRUD domain flows",
+      "branchName": "ralph/sematrix-mvp/ep-004-note-crud-assets-tags",
       "description": "Implement the core backend CRUD and domain flows for folders, tags, assets, note creation, note reading, save, delete, and reindex entrypoints in line with the fixed REST API.",
       "acceptanceCriteria": [
         "All required CRUD/list endpoints from section 4.10.3 exist",
@@ -464,6 +468,7 @@
     {
       "id": "EP-005",
       "title": "Draft lifecycle, pipeline orchestration, race protection, and timing",
+      "branchName": "ralph/sematrix-mvp/ep-005-pipeline-orchestration",
       "description": "Implement the full note processing lifecycle: Draft handling, transition to Processing, snapshot-based race protection, Celery group/chord orchestration, finalization, error handling, warnings, retries, and TTL cleanup.",
       "acceptanceCriteria": [
         "Save and reindex can start exactly one pipeline run per new note version",
@@ -625,6 +630,7 @@
     {
       "id": "EP-006",
       "title": "Image OCR/caption and secure link processing",
+      "branchName": "ralph/sematrix-mvp/ep-006-ocr-and-link-processing",
       "description": "Implement the background enrichment stages for note images and note links, including OCR, image captioning, SSRF-safe HTTP fetching, YouTube Data API handling, and per-link/per-asset warning behavior.",
       "acceptanceCriteria": [
         "All image processing results are persisted per pipeline run and can contribute to the final search-document",
@@ -766,6 +772,7 @@
     {
       "id": "EP-007",
       "title": "Hybrid search, search-document construction, and scoring",
+      "branchName": "ralph/sematrix-mvp/ep-007-hybrid-search",
       "description": "Implement the backend search system: query parsing, search-document construction, RU+EN FTS, vector search, RRF fusion, stable sorting, and GET /api/notes search behavior.",
       "acceptanceCriteria": [
         "The backend can parse #tags and free text from q exactly as specified",
@@ -880,6 +887,7 @@
     {
       "id": "EP-008",
       "title": "Frontend shell, main screen, sidebar, and card grid",
+      "branchName": "ralph/sematrix-mvp/ep-008-frontend-shell-and-grid",
       "description": "Implement the React/Vite main workspace with the fixed layout: top global search, left sidebar for folders and tags, main grid of note cards, plus-card creation, and paginated loading from the backend.",
       "acceptanceCriteria": [
         "The main UI layout matches the spec: search on top, folders/tags on the left, cards in the center",
@@ -1001,6 +1009,7 @@
     {
       "id": "EP-009",
       "title": "Note editor, Tiptap behavior, image nodes, and note actions",
+      "branchName": "ralph/sematrix-mvp/ep-009-note-editor",
       "description": "Implement the note detail screen and Tiptap-based editor with the exact MVP feature set: rich text, inline images via assetId, links, tags, folder selection, Save/Delete/Reindex, and #tag auto-conversion with undo behavior.",
       "acceptanceCriteria": [
         "The editor supports the exact minimum Tiptap feature set from the specification",
@@ -1140,6 +1149,7 @@
     {
       "id": "EP-010",
       "title": "Backup, restore, and project documentation",
+      "branchName": "ralph/sematrix-mvp/ep-010-backup-restore-docs",
       "description": "Implement the user-facing operational artifacts required by the spec: backup/restore scripts and a README that explains startup, local access, models, storage, and troubleshooting.",
       "acceptanceCriteria": [
         "scripts/backup.sh creates reproducible backups containing pg_dump output plus ./data/assets",
@@ -1198,6 +1208,7 @@
     {
       "id": "EP-011",
       "title": "Unit and integration test coverage for MVP behavior",
+      "branchName": "ralph/sematrix-mvp/ep-011-test-coverage",
       "description": "Implement automated unit and integration tests for the required behaviors called out in the specification, and extend coverage to all implemented functionality without adding e2e tests.",
       "acceptanceCriteria": [
         "The test suite contains unit and integration tests only",

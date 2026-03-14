@@ -1,0 +1,199 @@
+# AGENTS.md
+
+This file captures durable repository-level rules for autonomous agents working on **Sematrix**.
+
+Use it to preserve stable project invariants.
+Do **not** duplicate story-specific implementation details here.
+
+If there is a conflict:
+
+1. Follow direct user instructions.
+2. Follow `CODEX.md` for execution workflow.
+3. Follow this file for project-level constraints.
+4. Use `./docs/full-specs.md` as the source of truth for details not repeated here.
+
+---
+
+## 1. Project Boundaries
+
+- Sematrix is a **single-user local-first** notes application.
+- There is **no auth, no roles, no registration**, and no password protection in MVP.
+- Services exposed by Docker must bind to **localhost only** (`127.0.0.1`).
+- The whole system must run locally through **Docker Compose**.
+- All AI models must run **locally**. Do not introduce external LLM APIs for core product behavior.
+
+---
+
+## 2. Planning and Branch Model
+
+- The PRD may be organized as **epics -> userStories**.
+- A user story is the atomic executable work item.
+- An epic is the planning, prioritization, and branch container for its nested stories.
+- The PRD top-level `branchName` is the shared project/base integration branch.
+- In nested PRD mode, each epic must have its own `branchName`.
+- All work for stories inside one epic must happen on that epic branch.
+- Do not mix unfinished work from multiple epics on one branch.
+- Do not create per-story branches unless the user explicitly changes the workflow.
+
+---
+
+## 3. Fixed Stack and Repo Shape
+
+Keep the project aligned with the fixed stack:
+
+- **Backend:** Python 3.12+, FastAPI, Pydantic, SQLAlchemy 2.x, Alembic
+- **Workers:** Celery + Redis
+- **Database:** PostgreSQL + pgvector
+- **Frontend:** React + TypeScript (Vite)
+- **Editor:** Tiptap
+- **Local AI runtime:** Ollama
+- **OCR:** PaddleOCR
+
+Preferred repo shape:
+
+- `backend/app/api` — HTTP layer only
+- `backend/app/domain` — business logic
+- `backend/app/infra` — DB models, repositories, external/local clients
+- `backend/app/workers` — Celery entrypoints that call domain services
+- `frontend/` — SPA
+
+Preserve clean separation: **api -> domain -> infra**.
+Do not move business logic into route handlers or UI code.
+
+---
+
+## 4. Core Product Invariants
+
+### Notes
+
+- `content_json` is the **source of truth** for note content.
+- `content_text_flat` is derived text used for search/indexing.
+- Note status lifecycle is fixed: **Draft -> Processing -> Ready / Error**.
+- Save is **explicit only** in MVP. Do not add autosave unless the spec is changed.
+- A note should enter `Processing` only after a **meaningful save**.
+- If a note returns to `Draft`, derived indexing data must stop affecting search/results.
+
+### Folders and Tags
+
+- Folders are **flat**. No nesting in MVP.
+- Deleting a folder moves notes to **no folder** (`folder_id = null`).
+- Tags must be normalized to **lowercase**.
+- Tags cannot contain spaces; only allowed characters from the spec are valid.
+
+### Assets
+
+- Images are stored on disk under `./data/assets`.
+- Tiptap image nodes must reference **`assetId`**, not data URLs.
+- Asset usage must be tracked through `note_assets`.
+- Unused files should only be removed when they are no longer referenced anywhere.
+- Image upload must always be tied to a **real `note_id`**.
+
+---
+
+## 5. Indexing and Pipeline Rules
+
+- `index_version` is mandatory protection against stale background writes.
+- Every Save/Reindex that triggers processing must create a new pipeline run for the current version.
+- Background processing must use a **snapshot** of note assets/links for that run.
+- Stale results must never overwrite newer note state.
+
+### Pipeline ownership
+
+- The only pipeline entrypoint is `start_pipeline(note_id, index_version, request_id)`.
+- Individual OCR/link/caption stages must not be launched ad hoc from API routes.
+- Only `finalize_pipeline(...)` or `pipeline_failed(...)` may set the final note state to `Ready` or `Error`.
+
+### Worker granularity
+
+- Worker stages should be **coarse-grained**: process all links of a note, or all images of a note.
+- Do not explode work into one Celery task per single asset/link unless the spec changes.
+- Do not pass large payloads through Celery/Redis. Pass identifiers only.
+- Intermediate results belong in persistent storage, and finalization must read them from there.
+
+### Error policy
+
+- OCR failure for one image, caption failure for one image, or failure for one link is normally **non-critical**.
+- Non-critical enrichment failures should produce warnings, not automatically fail the whole note.
+- `Error` is reserved for failures that block finalization or make the indexed note state invalid.
+
+---
+
+## 6. Search and Model Rules
+
+- Search is **hybrid**: lexical + semantic.
+- Lexical search must use stored/indexed PostgreSQL FTS data, not ad hoc `to_tsvector(...)` per request.
+- The FTS strategy is fixed to **RU + EN**, using explicit Russian and English configurations.
+- Semantic search uses the note embedding stored in pgvector.
+- Hybrid ranking uses **RRF**, not page-local score normalization.
+- `search_text` is the canonical search document.
+- `note.summary` must **not** be fed back into `search_text`.
+- Final summary is generated **from** `search_text`, not the other way around.
+- Summary generation must use the configured Qwen model in **non-thinking mode**.
+
+---
+
+## 7. Frontend / Backend Boundary
+
+- Frontend is a client of the backend API.
+- Backend owns:
+  - note persistence
+  - tag normalization
+  - asset/link synchronization
+  - title generation
+  - summary generation
+  - OCR / caption / link extraction
+  - search document construction
+  - embeddings
+  - ranking / score calculation
+- Frontend must not implement backend indexing logic locally.
+- MVP status updates are **REST-based only**. Do not add SSE/WebSocket status streaming unless explicitly requested.
+
+---
+
+## 8. Link Processing and Safety
+
+When handling links:
+
+- Only `http` / `https` are allowed.
+- Only public resources are allowed.
+- Requests to localhost, loopback, private, link-local, or otherwise internal IP ranges must be blocked.
+- DNS resolution and redirect validation must be part of the safety model.
+- Timeouts, redirect limits, and response-size limits are mandatory.
+
+YouTube-specific rule:
+
+- Prefer the official **YouTube Data API v3**.
+- Do not treat raw HTML scraping as the main YouTube integration path.
+
+---
+
+## 9. Draft Cleanup and Operations
+
+- Empty/abandoned Draft notes are expected and must be cleaned up by a scheduled TTL job.
+- Draft cleanup belongs to the worker layer and must be scheduled via **celery beat**, not the API process.
+- Persistent runtime data lives under `./data`.
+- Configuration should come from **ENV** with sensible defaults.
+- The repo should remain reproducible from a fresh checkout with Docker-based startup.
+
+---
+
+## 10. What to Store Here
+
+Keep this file short and durable.
+Add only repository truths that future tasks will need repeatedly, such as:
+
+- architectural boundaries
+- lifecycle invariants
+- branch/workflow invariants
+- search/indexing invariants
+- security constraints
+- fixed product assumptions
+
+Do **not** store here:
+
+- story-by-story notes
+- temporary debugging context
+- one-off migration details
+- task-specific implementation plans
+
+Those belong in `progress.txt`, PRD notes, or the current task context.
