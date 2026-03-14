@@ -25,8 +25,8 @@
             "No extra top-level product modules that are not required by the specification are introduced"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly fixes the repository structure and layered backend separation. This task must only create the required structure and not invent extra product areas."
+          "passes": true,
+          "notes": "The spec explicitly fixes the repository structure and layered backend separation. This task must only create the required structure and not invent extra product areas. Added package placeholders for the backend layers and a repository-layout pytest check to keep the scaffold aligned with the spec."
         },
         {
           "id": "US-002",

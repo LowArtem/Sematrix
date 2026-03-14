@@ -1,0 +1,37 @@
+## Codebase Patterns
+- Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
+
+## [2026-03-14 16:02:46 +0300] - EP-001 / US-001
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Create the repository layout exactly as specified
+Thread: CLI run
+- What was implemented
+  - Added backend package placeholders for the fixed `api`, `core`, `domain`, `infra`, and `workers` layers.
+  - Added a repository layout test and minimal pytest configuration to verify the required scaffold.
+  - Filled in `README.md` with the baseline structure description without implementing later infrastructure stories.
+- Files changed
+  - `backend/app/__init__.py`
+  - `backend/app/api/__init__.py`
+  - `backend/app/core/__init__.py`
+  - `backend/app/domain/__init__.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/app/workers/__init__.py`
+  - `backend/tests/test_repository_layout.py`
+  - `pyproject.toml`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (2 passed)
+- PRD updates made
+  - Marked `US-001` as passed and added a durable note about the scaffold guard test.
+  - Re-evaluated `EP-001`; it remains `passes: false` because other user stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - The repo can use lightweight structure tests early to protect scaffolding before feature code exists.
+  - Gotchas encountered
+    - Avoid filling `docker-compose.yml` or runtime behavior during scaffold-only work, because those belong to later infrastructure stories.
+  - Useful context
+    - The backend package roots now exist as importable Python packages for follow-up stories.
+---
