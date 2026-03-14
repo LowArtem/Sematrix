@@ -24,6 +24,7 @@ from app.infra.assets import get_asset_path
 from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
 from app.infra.ocr import OcrClientError, PaddleOcrClient
 from app.infra.ollama import OllamaClient, OllamaClientError
+from app.infra.youtube import YouTubeDataApiClient, YouTubeDataApiClientError
 from app.workers.celery_app import celery_app
 
 
@@ -81,6 +82,14 @@ class SnapshotAssetRecord:
 
 
 @dataclass(frozen=True)
+class SnapshotLinkRecord:
+    link_id: UUID
+    url: str
+    normalized_url: str
+    link_type: str
+
+
+@dataclass(frozen=True)
 class LinkProcessingTextResult:
     url: str
     page_title: str
@@ -109,6 +118,13 @@ class PipelineRuntimeRepository(Protocol):
     ) -> list[SnapshotAssetRecord]: ...
 
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]: ...
+
+    def list_snapshot_links(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]: ...
 
     def get_finalization_runtime_state(
         self,
@@ -186,6 +202,22 @@ class PipelineRuntimeRepository(Protocol):
         asset_id: UUID,
         caption_text: str,
         caption_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
+
+    def store_link_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        link_id: UUID,
+        page_title: str,
+        content_type: str | None,
+        extracted_text: str,
+        generated_summary: str,
+        metadata_json: dict[str, object],
+        fetch_status: str,
         warnings: list[dict[str, object]],
     ) -> None: ...
 
@@ -304,6 +336,32 @@ class SqlAlchemyPipelineRuntimeRepository:
             )
         )
         return [link_id for link_id in snapshot_link_ids if link_id in existing_link_ids]
+
+    def list_snapshot_links(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]:
+        if not snapshot_link_ids:
+            return []
+
+        rows = self._session.execute(
+            select(NoteLink.id, NoteLink.url, NoteLink.normalized_url, NoteLink.link_type).where(
+                NoteLink.note_id == note_id,
+                NoteLink.id.in_(snapshot_link_ids),
+            )
+        ).all()
+        links_by_id = {
+            link_id: SnapshotLinkRecord(
+                link_id=link_id,
+                url=url,
+                normalized_url=normalized_url,
+                link_type=link_type,
+            )
+            for link_id, url, normalized_url, link_type in rows
+        }
+        return [links_by_id[link_id] for link_id in snapshot_link_ids if link_id in links_by_id]
 
     def get_finalization_runtime_state(
         self,
@@ -589,6 +647,47 @@ class SqlAlchemyPipelineRuntimeRepository:
         self._session.add(result)
         self._session.commit()
 
+    def store_link_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        link_id: UUID,
+        page_title: str,
+        content_type: str | None,
+        extracted_text: str,
+        generated_summary: str,
+        metadata_json: dict[str, object],
+        fetch_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(LinkProcessingResult).where(
+                LinkProcessingResult.note_id == note_id,
+                LinkProcessingResult.index_version == index_version,
+                LinkProcessingResult.pipeline_run_id == pipeline_run_id,
+                LinkProcessingResult.link_id == link_id,
+            )
+        )
+        if result is None:
+            result = LinkProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                link_id=link_id,
+                index_version=index_version,
+            )
+
+        result.page_title = page_title
+        result.content_type = content_type
+        result.extracted_text = extracted_text
+        result.generated_summary = generated_summary
+        result.metadata_json = metadata_json
+        result.fetch_status = fetch_status
+        result.warnings = warnings
+        self._session.add(result)
+        self._session.commit()
+
     def fail_pipeline_run(
         self,
         *,
@@ -792,10 +891,12 @@ class PipelineStageRunner:
         runtime_repository: PipelineRuntimeRepository,
         ocr_client: PaddleOcrClient,
         ollama_client: OllamaClient,
+        youtube_client: YouTubeDataApiClient,
     ) -> None:
         self._runtime_repository = runtime_repository
         self._ocr_client = ocr_client
         self._ollama_client = ollama_client
+        self._youtube_client = youtube_client
 
     def process_links(
         self,
@@ -805,18 +906,133 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_links",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_link_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_link_ids(
-                note_id=note_id,
-                snapshot_link_ids=snapshot_target_ids,
-            ),
         )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_links",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        links = self._runtime_repository.list_snapshot_links(
+            note_id=note_id,
+            snapshot_link_ids=runtime_state.snapshot_link_ids,
+        )
+        filtered_links = self._filter_snapshot_links(
+            stage_name="process_links",
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            links=links,
+            snapshot_link_ids=runtime_state.snapshot_link_ids,
+        )
+        links_by_id = {link.link_id: link for link in filtered_links}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for link_id in runtime_state.snapshot_link_ids:
+            link = links_by_id.get(link_id)
+            if link is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_links",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=link_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            if link.link_type != "youtube_video":
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_links",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=link_id,
+                    skipped_reason="unsupported_link_type",
+                )
+                continue
+
+            processed_count += 1
+            warnings: list[dict[str, object]] = []
+            page_title = ""
+            extracted_text = ""
+            generated_summary = ""
+            metadata_json: dict[str, object] = {}
+            fetch_status = "error"
+            content_type = "application/vnd.youtube.video+json"
+
+            try:
+                metadata = self._youtube_client.fetch_video_metadata(url=link.url)
+                page_title = metadata.title
+                extracted_text = metadata.build_index_text()
+                generated_summary = metadata.build_summary()
+                metadata_json = metadata.to_metadata_dict()
+                fetch_status = "done"
+            except YouTubeDataApiClientError as exc:
+                warnings = [
+                    build_processing_warning(
+                        stage="link_fetch",
+                        target=link.url,
+                        code="youtube_video_fetch_failed",
+                        message=str(exc),
+                        retryable=exc.retryable,
+                    )
+                ]
+                warning_count += 1
+
+            self._runtime_repository.store_link_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                link_id=link.link_id,
+                page_title=page_title,
+                content_type=content_type,
+                extracted_text=extracted_text,
+                generated_summary=generated_summary,
+                metadata_json=metadata_json,
+                fetch_status=fetch_status,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_links",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_links",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
 
     def process_ocr(
         self,
@@ -1202,6 +1418,30 @@ class PipelineStageRunner:
             )
         )
         return [asset for asset in assets if asset.asset_id in filtered_asset_ids]
+
+    def _filter_snapshot_links(
+        self,
+        *,
+        stage_name: str,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        links: list[SnapshotLinkRecord],
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]:
+        filtered_link_ids = set(
+            self._filter_snapshot_target_ids(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                candidate_target_ids=[link.link_id for link in links],
+                snapshot_target_ids=snapshot_link_ids,
+            )
+        )
+        return [link for link in links if link.link_id in filtered_link_ids]
 
     def _filter_snapshot_target_ids(
         self,
@@ -1743,6 +1983,10 @@ def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
             llm_model=settings.llm_model,
             embed_model=settings.embed_model,
             vision_model=settings.vision_model,
+        ),
+        youtube_client=YouTubeDataApiClient(
+            api_key=settings.youtube_api_key,
+            timeout_sec=settings.link_fetch_timeout_sec,
         ),
     )
 

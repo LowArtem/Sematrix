@@ -39,6 +39,44 @@
 - Keep image caption generation in `app/infra/ollama.py` and inject that client into `PipelineStageRunner`, so `process_image_caption` can reuse the configured vision model while tests swap in fakes without moving caption logic into Celery tasks.
 - Normalize extracted note URLs before syncing `note_links` by lowercasing scheme/host, removing fragments/default ports, and sorting query params so plain-text URLs and link marks collapse onto the same `normalized_url`.
 - Keep SSRF-safe link fetching in `app/infra/link_fetcher.py`, with a no-redirect opener plus per-hop scheme/port/DNS revalidation and streamed size/time limits before any link-specific parser touches the body.
+- Keep YouTube Data API calls in `app/infra/youtube.py`, and persist both structured metadata plus derived index text/summary on `link_processing_results` so finalization can consume official API output without HTML scraping.
+
+## [2026-03-15 01:19:53 +0300] - EP-006 / US-044
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement YouTube video metadata retrieval through YouTube Data API v3
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/youtube.py` with a dedicated `YouTubeDataApiClient`, supported YouTube video-id extraction helpers, structured response parsing for `snippet`, `contentDetails`, and `statistics`, plus derived index-text and summary builders.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now reloads snapshot-scoped `note_links`, processes `youtube_video` links through the YouTube client, persists the required structured metadata on `link_processing_results.metadata`, and saves derived `page_title`, `extracted_text`, and `generated_summary` fields for final indexing.
+  - Added `backend/tests/test_youtube_api.py` runtime-focused unit coverage and `backend/tests/test_pipeline_youtube_video_stage.py` source guards, and updated `AGENTS.md` with the durable YouTube-client placement/persistence rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/youtube.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `backend/tests/test_youtube_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_youtube_api.py backend/tests/test_pipeline_youtube_video_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (105 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner YouTube video smoke test with fake YouTube client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-044` as passed and added a durable note about the dedicated YouTube Data API client, snapshot-scoped link-stage writes, and persistence of both structured metadata and derived indexing text.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the YouTube channel fallback, text-file/webpage processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep YouTube Data API access in one infra adapter and persist both metadata plus derived text fields on `link_processing_results`, so finalization can index official API data without special-casing YouTube later.
+  - Gotchas encountered
+    - The link stage still has to derive `extracted_text` / `generated_summary` immediately from the API payload; storing only `metadata` would leave finalization blind because it currently reads the durable text fields, not raw JSON blobs.
+  - Useful context
+    - `sematrix.process_links` currently processes only `youtube_video` links and explicitly skips the other link types until the later channel/web/text stories extend the same snapshot-scoped stage.
+---
 
 ## [2026-03-15 01:03:10 +0300] - EP-006 / US-042
 Epic: Image OCR/caption and secure link processing

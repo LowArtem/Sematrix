@@ -707,8 +707,8 @@
             "Structured video metadata is available for final note indexing and link summary generation"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires YouTube Data API v3 and expanded metadata, not just title plus author."
+          "passes": true,
+          "notes": "The spec explicitly requires YouTube Data API v3 and expanded metadata, not just title plus author. Added `app.infra.youtube.YouTubeDataApiClient` plus a YouTube-video branch in `sematrix.process_links` that extracts supported video IDs from saved URLs, fetches `videos?part=snippet,contentDetails,statistics`, persists the structured metadata on `link_processing_results.metadata`, and derives indexable text plus a summary from the API payload so finalization can consume YouTube data without scraping HTML."
         },
         {
           "id": "US-045",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, and the shared SSRF-safe fetcher are now in place, but the YouTube metadata retrieval, webpage/text processing, and warning-surface stories are still open."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, and YouTube video metadata retrieval through the official Data API are now in place, but the YouTube channel metadata, webpage/text processing, and warning-surface stories are still open."
     },
     {
       "id": "EP-007",
