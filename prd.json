@@ -545,8 +545,8 @@
             "Celery arguments/results do not contain content_json, OCR text, page HTML, embeddings, or other large payloads"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The specification is explicit that Redis is only for commands and small service results, not for carrying processing payloads."
+          "passes": true,
+          "notes": "The specification is explicit that Redis is only for commands and small service results, not for carrying processing payloads. Added a guarded stage runner in `app.infra.pipeline` that reloads `pipeline_run_id` snapshot state per task, validates `note.index_version`, `pipeline_runs.note_id/index_version`, and `snapshot_hash`, loads live asset/link rows only through snapshot-filtered queries, and keeps worker task payloads/results limited to identifiers, counts, skip reasons, and timings."
         },
         {
           "id": "US-035",

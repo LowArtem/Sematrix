@@ -4,7 +4,7 @@ from uuid import UUID
 from app.domain.system import WorkerHeartbeatService
 from app.core import get_logger
 from app.infra import SessionLocal
-from app.infra.pipeline import build_pipeline_orchestrator
+from app.infra.pipeline import build_pipeline_orchestrator, build_pipeline_stage_runner
 from app.workers.celery_app import celery_app
 
 
@@ -70,11 +70,21 @@ def process_links(
             "pipeline_run_id": pipeline_run_id,
         },
     )
+    session = SessionLocal()
+    try:
+        stage_runner = build_pipeline_stage_runner(session=session)
+        stage_result = stage_runner.process_links(
+            note_id=UUID(note_id),
+            index_version=index_version,
+            pipeline_run_id=UUID(pipeline_run_id),
+            request_id=request_id,
+        )
+    finally:
+        session.close()
+
     return {
-        "stage_name": "process_links",
-        "status": "done",
+        **stage_result,
         "duration_ms": int((perf_counter() - started_at) * 1000),
-        "skipped": False,
     }
 
 
@@ -98,11 +108,21 @@ def process_ocr(
             "pipeline_run_id": pipeline_run_id,
         },
     )
+    session = SessionLocal()
+    try:
+        stage_runner = build_pipeline_stage_runner(session=session)
+        stage_result = stage_runner.process_ocr(
+            note_id=UUID(note_id),
+            index_version=index_version,
+            pipeline_run_id=UUID(pipeline_run_id),
+            request_id=request_id,
+        )
+    finally:
+        session.close()
+
     return {
-        "stage_name": "process_ocr",
-        "status": "done",
+        **stage_result,
         "duration_ms": int((perf_counter() - started_at) * 1000),
-        "skipped": False,
     }
 
 
@@ -126,11 +146,21 @@ def process_image_caption(
             "pipeline_run_id": pipeline_run_id,
         },
     )
+    session = SessionLocal()
+    try:
+        stage_runner = build_pipeline_stage_runner(session=session)
+        stage_result = stage_runner.process_image_caption(
+            note_id=UUID(note_id),
+            index_version=index_version,
+            pipeline_run_id=UUID(pipeline_run_id),
+            request_id=request_id,
+        )
+    finally:
+        session.close()
+
     return {
-        "stage_name": "process_image_caption",
-        "status": "done",
+        **stage_result,
         "duration_ms": int((perf_counter() - started_at) * 1000),
-        "skipped": False,
     }
 
 

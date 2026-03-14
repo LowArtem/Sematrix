@@ -29,6 +29,40 @@
 - For `GET /api/tags`, keep tag counting in the repository via an outer join on `note_tags`, and when `q` is present use ordering that moves substring matches first without filtering the non-matching tags out of the paginated result set.
 - Create `pipeline_runs` inside the same note save/reindex repository transaction after flushing synchronized `note_assets` and `note_links`, so snapshots capture DB-assigned link IDs before dispatching background work.
 - Keep pipeline stage selection in `app/domain/pipeline.py`, and let the worker-side orchestrator load `pipeline_runs` snapshot state from the repository before it schedules any Celery `group/chord` work.
+- Keep stage guards in `app/infra/pipeline.py`, and have worker stages reload `pipeline_run_id` snapshot state there so they validate `index_version`/`snapshot_hash` and query live assets or links only through snapshot-filtered IDs.
+
+## [2026-03-14 21:10:58 +0300] - EP-005 / US-034
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement stage guards, snapshot membership checks, and small Celery payload policy
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/pipeline.py` with a dedicated stage-runtime loader and `PipelineStageRunner` so `process_links`, `process_ocr`, and `process_image_caption` now reload `pipeline_run_id` snapshot state, validate `note.index_version`, validate the `pipeline_runs` note/version pairing, and recompute `snapshot_hash` before doing any stage work.
+  - Added snapshot-filtered asset/link lookup helpers so batch stages derive their live worklists only from `snapshot_asset_ids` / `snapshot_link_ids`, log `not_in_snapshot` or `missing_target` skips when needed, and return only small metadata such as counts, skip reasons, and timings.
+  - Updated `backend/app/workers/tasks.py` so stage tasks delegate through the guarded stage runner with only `note_id`, `index_version`, `pipeline_run_id`, and `request_id`, and added source guards in `backend/tests/test_pipeline_stage_guards.py` plus a scratch-Postgres smoke test for fresh and stale stage execution.
+- Files changed
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_pipeline_stage_guards.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (64 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... stage runner smoke test for current and stale versions ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-034` as passed and added a durable note about guarded stage runtime validation, snapshot-filtered stage queries, and small Celery payloads/results.
+  - Re-evaluated `EP-005`; it remains `passes: false` because finalize/error handling, retry policy, cleanup, and later lifecycle stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep stage guard logic in a shared pipeline-infra runner so all worker stages enforce the same snapshot validation and small-payload policy before the later OCR/link/caption implementations fill in stage-specific behavior.
+  - Gotchas encountered
+    - Stage tasks should reload the `pipeline_runs` snapshot by `pipeline_run_id` instead of trusting orchestration-time state, or a stale worker can still run after a newer save/reindex changes `note.index_version`.
+  - Useful context
+    - The guarded stage runner currently returns only counts, skip reasons, and timings, which keeps Celery payloads small while leaving final durable OCR/link/caption writes for the later stage-specific stories.
+---
 
 ## [2026-03-14 21:02:40 +0300] - EP-005 / US-033
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
