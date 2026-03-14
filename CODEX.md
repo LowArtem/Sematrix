@@ -5,56 +5,48 @@ You are an autonomous coding agent working on a software project.
 1. Read the PRD at `prd.json` (in the same directory as this file).
 2. Read the progress log at `progress.txt` (check the `## Codebase Patterns` section first).
 3. Determine the PRD structure:
-   - **Nested PRD mode**: if the PRD contains top-level `epics`, treat epics as planning containers and `userStories` as the only executable work items.
-   - **Legacy flat mode**: if the PRD contains top-level `userStories` and no `epics`, use the legacy single-level flow.
+   - if the PRD contains top-level `epics`, treat epics as planning containers and `userStories` as the only executable work items.
 4. Pick exactly one executable work item:
-   - In **Nested PRD mode**:
-     1. Consider only epics where `passes: false`.
-     2. Ignore epics that have no `userStories` only after recording a note in that epic explaining the schema issue.
-     3. Pick the epic with the **highest priority**.
-     4. Inside that epic, pick the highest priority user story where `passes: false`.
-     5. Treat lower numeric `priority` values as higher priority (`1` beats `2`). If priorities are equal, preserve file order.
-     6. Use **both** the selected epic context (`title`, `description`, `acceptanceCriteria`, `notes`) and the selected user story context when implementing.
-   - In **Legacy flat mode**:
-     1. Pick the highest priority user story where `passes: false`.
-     2. Treat lower numeric `priority` values as higher priority (`1` beats `2`). If priorities are equal, preserve file order.
+   1. Consider only epics where `passes: false`.
+   2. Ignore epics that have no `userStories` only after recording a note in that epic explaining the schema issue.
+   3. Pick the epic with the **highest priority**.
+   4. Inside that epic, pick the highest priority user story where `passes: false`.
+   5. Treat lower numeric `priority` values as higher priority (`1` beats `2`). If priorities are equal, preserve file order.
+   6. Use **both** the selected epic context (`title`, `description`, `acceptanceCriteria`, `notes`) and the selected user story context when implementing.
 5. Check out the correct git branch **before** making changes:
-   - In **Nested PRD mode**:
-     1. Use the selected epic `branchName` as the working branch.
-     2. Treat the PRD top-level `branchName` as the shared project integration base branch.
-     3. If the epic branch does not exist locally or remotely, create it from the top-level `branchName`.
-     4. If the top-level `branchName` does not exist, create the epic branch from `main` or `master`.
-     5. Never implement a story from one epic while staying on another epic's branch.
-   - In **Legacy flat mode**:
-     1. Use the PRD top-level `branchName`.
-     2. If it does not exist, create it from `main` or `master`.
+   1. Use the selected epic `branchName` as the working branch.
+   2. Treat the PRD top-level `branchName` as the shared project integration base branch.
+   3. If the epic branch does not exist locally or remotely, create it from the top-level `branchName`.
+   4. If the top-level `branchName` does not exist, create the epic branch from `main` or `master`.
+   5. Never implement a story from one epic while staying on another epic's branch.
 6. Implement that single user story only. Do not implement multiple user stories in one run.
 7. Run quality checks (typecheck, lint, test — use whatever your project requires). Backpressure is mandatory: if you cannot identify a real check command/config in the repo, treat the story as BLOCKED (see Backpressure Requirements).
 8. Update `AGENTS.md` files if you discover reusable patterns (see below).
 9. If checks pass, commit **ALL** changes with message: `feat: <UserStory ID> - <UserStory Title>` where UserStoryId is the `id` of corresponding userStory item from prd.json and UserStory Title is its title.
 10. Update the PRD:
-    - In **Nested PRD mode**:
-      - Set the completed user story `passes: true`.
-      - Update the story `notes` if a short durable note would help future iterations.
-      - Re-evaluate the parent epic immediately after the story is completed:
-        - Set epic `passes: true` only when **all** nested user stories have `passes: true` **and** the epic-level acceptance criteria are satisfied by the current codebase state.
-        - Otherwise, leave epic `passes: false`.
-        - If all nested user stories are complete but the epic still cannot be honestly marked as passed, add a clear note to the epic explaining the unmet criterion or blocking reason.
-    - In **Legacy flat mode**:
-      - Set the completed user story `passes: true`.
+    - Set the completed user story `passes: true`.
+    - Update the story `notes` if a short durable note would help future iterations.
+    - Re-evaluate the parent epic immediately after the story is completed:
+      - Set epic `passes: true` only when **all** nested user stories have `passes: true` **and** the epic-level acceptance criteria are satisfied by the current codebase state.
+      - Otherwise, leave epic `passes: false`.
+      - If all nested user stories are complete but the epic still cannot be honestly marked as passed, add a clear note to the epic explaining the unmet criterion or blocking reason.
 11. Append your progress to `progress.txt`.
 
-If there are no executable user stories with `passes: false`:
+If the selected epic has no remaining user stories with `passes: false`:
 
-- In **Nested PRD mode**:
-  - If every epic is also `passes: true`, output `<promise>COMPLETE</promise>` and exit without making changes.
-  - If no user stories remain but one or more epics are still `passes: false`, treat this as a PRD integrity/blocking issue:
-    - add a clear note to the affected epic(s),
-    - append the situation to `progress.txt`,
-    - create `.ralph-disabled` with a short note,
-    - output `<promise>COMPLETE</promise>` and exit.
-- In **Legacy flat mode**:
-  - Output `<promise>COMPLETE</promise>` and exit without making changes.
+- Re-evaluate the epic acceptance criteria.
+- If epic acceptance criteria are satisfied:
+  - switch to the project integration branch from top-level `branchName`
+  - merge the completed `epic.branchName` into it
+  - run relevant validation checks again if needed
+  - if merge and checks succeed, set epic `passes: true`
+- If epic acceptance criteria are not satisfied, do not mark the epic as passed; add a note explaining what is still missing.
+- If merge fails or validation fails after merge, treat the epic as BLOCKED and record the reason in `progress.txt` and epic `notes`.
+
+If there are no executable user stories with `passes: false` anywhere in the PRD:
+
+- If every epic is `passes: true`, output `<promise>COMPLETE</promise>` and exit.
+- Otherwise, process any remaining unfinished epics through epic finalization / merge flow instead of treating that state as an automatic PRD integrity issue.
 
 If asked to deactivate Ralph, create a `.ralph-disabled` file at the repo root with a short note (e.g. `deactivated by agent`) and then exit without further changes.
 
