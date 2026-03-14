@@ -105,13 +105,13 @@
             "The setup remains a single-user localhost-only application without authentication"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The frontend stack is React + TypeScript via Vite, and the API prefix is fixed to /api. This task is only about runtime serving/proxying, not UI implementation."
+          "passes": true,
+          "notes": "The frontend stack is React + TypeScript via Vite, and the API prefix is fixed to /api. This task is only about runtime serving/proxying, not UI implementation. Replaced the static placeholder image with a multi-stage frontend build that compiles the Vite SPA inside Docker, serves `dist/` from Nginx, and proxies same-origin `/api/*` requests to `backend:8000` via `frontend/nginx.conf`."
         }
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. EP-001 remains open until the SPA runtime proxy story is implemented."
+      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. All nested user stories are now complete, but the epic still cannot be marked passed because `docker compose up --build` currently fails in this environment when `ollama-init` exits unsuccessfully before the full stack becomes ready, so the epic-level one-command startup acceptance criterion is not yet satisfied by the observed repository state."
     },
     {
       "id": "EP-002",

@@ -56,10 +56,35 @@ h2 {
   line-height: 1.6;
 }
 
+.proxy-note {
+  margin: 1rem 0 0;
+  line-height: 1.6;
+}
+
+.proxy-note code {
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(47, 94, 147, 0.12);
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.95em;
+}
+
 ul {
   margin: 1rem 0 0;
   padding-left: 1.25rem;
   line-height: 1.8;
+}
+
+.api-link {
+  display: inline-flex;
+  margin-top: 1.25rem;
+  color: #1f4f84;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.api-link:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 640px) {

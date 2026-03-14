@@ -4,7 +4,7 @@ const bulletItems = [
   "Ollama for local models",
   "FastAPI backend",
   "Celery worker and beat",
-  "React frontend build served by Nginx",
+  "React SPA build served by Nginx",
 ]
 
 export default function App() {
@@ -17,6 +17,10 @@ export default function App() {
           The Docker Compose baseline is up, so future stories can fill in the
           backend API, workers, and note UI on top of a running stack.
         </p>
+        <p className="proxy-note">
+          Frontend requests can stay same-origin and reach the backend through
+          the fixed <code>/api</code> prefix.
+        </p>
       </section>
 
       <section className="card">
@@ -26,6 +30,9 @@ export default function App() {
             <li key={item}>{item}</li>
           ))}
         </ul>
+        <a className="api-link" href="/api/health">
+          Check proxied API health
+        </a>
       </section>
     </main>
   )

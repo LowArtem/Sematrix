@@ -95,3 +95,15 @@ def test_compose_initializes_required_ollama_models_before_model_clients_start()
     assert "- /scripts/ollama-init.sh" in result.stdout
     assert f"source: {scripts_path}" in result.stdout
     assert result.stdout.count("condition: service_completed_successfully") == 3
+
+
+def test_frontend_runtime_builds_vite_bundle_and_proxies_api_prefix() -> None:
+    dockerfile = (REPO_ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+    nginx_config = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert "FROM node:24-bookworm-slim AS build" in dockerfile
+    assert "RUN npm run build" in dockerfile
+    assert "COPY --from=build /app/frontend/dist /usr/share/nginx/html" in dockerfile
+    assert "location /api/" in nginx_config
+    assert "proxy_pass http://backend:8000/api/;" in nginx_config
+    assert "try_files $uri $uri/ /index.html;" in nginx_config

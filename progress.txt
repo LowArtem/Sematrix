@@ -5,6 +5,46 @@
 - For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
 - For Ollama GPU passthrough in this repo, prefer `deploy.resources.reservations.devices` over a top-level `gpus` key because the current Compose validator rejects `services.<name>.gpus` during `docker compose config`.
 - For automatic Ollama model availability, use a one-shot `ollama-init` service that shares `./data/ollama`, waits for the API, and gates model-dependent services with `condition: service_completed_successfully`.
+- Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
+
+## [2026-03-14 16:59:52 +0300] - EP-001 / US-007
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Serve the built React SPA and route browser API calls to /api
+Thread: CLI run
+- What was implemented
+  - Replaced the frontend runtime image with a multi-stage Docker build that installs frontend dependencies, compiles the Vite React SPA, and serves the generated `dist/` bundle from Nginx.
+  - Added `frontend/nginx.conf` so same-origin browser requests under `/api/` proxy to `http://backend:8000/api/` while SPA routes fall back to `index.html`.
+  - Updated the placeholder React shell to mention the fixed `/api` proxy path, added a direct health link, and added tests plus Docker ignore rules to keep local frontend artifacts out of image builds.
+- Files changed
+  - `.dockerignore`
+  - `.gitignore`
+  - `frontend/Dockerfile`
+  - `frontend/nginx.conf`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `backend/tests/test_docker_compose.py`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `npm --prefix frontend run build` ✅
+  - `python -m pytest` ✅ (8 passed)
+  - `docker compose config` ✅
+  - `docker compose build frontend` ✅
+  - `docker compose up -d --no-deps backend frontend` + HTTP smoke checks for `http://127.0.0.1:8000/api/health`, `http://127.0.0.1:8080`, and `http://127.0.0.1:8080/api/health` ✅
+  - `docker compose up --build -d` ❌ (`ollama-init` exited unsuccessfully before the full stack became ready, so the epic-level one-command startup acceptance is still not satisfied in the observed environment)
+- PRD updates made
+  - Marked `US-007` as passed and added a durable note about the multi-stage Vite build plus the Nginx `/api` proxy.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the full `docker compose up --build` acceptance check still fails on the existing `ollama-init` startup path even though all nested stories are now complete.
+- Learnings for future iterations:
+  - Patterns discovered
+    - A repo-root `.dockerignore` is worth adding as soon as frontend builds use local package managers, so local `node_modules` or `dist` outputs do not bloat Docker build contexts.
+  - Gotchas encountered
+    - The `node:24-bookworm-slim` builder worked reliably for `npm install` in Docker here, while the Alpine-based Node images produced broken installs in this environment.
+  - Useful context
+    - The SPA proxy configuration now lives in `frontend/nginx.conf`, and `http://127.0.0.1:8080/api/health` is the quickest runtime check for frontend-to-backend proxying.
+---
 
 ## [2026-03-14 16:41:42 +0300] - EP-001 / US-006
 Epic: Local infrastructure and Docker Compose bootstrap
