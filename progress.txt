@@ -32,6 +32,7 @@
 - Keep stage guards in `app/infra/pipeline.py`, and have worker stages reload `pipeline_run_id` snapshot state there so they validate `index_version`/`snapshot_hash` and query live assets or links only through snapshot-filtered IDs.
 - Keep final note finalization in `app/infra/pipeline.py` with an injected `app/infra/ollama.py` client so `finalize_pipeline` rebuilds `search_text`, embeddings, and final summary from durable PostgreSQL results while smoke tests can swap in fake local-model clients.
 - Keep pipeline failure handling in `app/infra/pipeline.py` so `pipeline_failed` can revalidate runtime state, downgrade non-critical stage failures into note warnings, and fall back to a shared finalizer or Error write from one place.
+- Keep the fixed Celery retry policy encoded on the worker task definitions themselves so link processing gets 3 total attempts with exponential backoff while OCR/image-caption get 2 total attempts without drifting from the spec.
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
@@ -105,6 +106,41 @@ Thread: CLI run
     - Adding new structured log fields is not enough by itself; `StructuredJsonFormatter` must whitelist them or `note_processing_finished` loses required timing/status data in the emitted JSON.
   - Useful context
     - The current finalizer already reads durable stage rows from PostgreSQL, so later OCR/link/caption stories only need to write their per-run results and warnings for finalization to consume them.
+---
+
+## [2026-03-14 21:36:32 +0300] - EP-005 / US-037
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement Celery retry policy exactly as specified
+Thread: CLI run
+- What was implemented
+  - Updated `backend/app/workers/tasks.py` so the three non-final pipeline stage tasks now carry the fixed Celery retry policy directly on their task definitions: link processing uses 3 total attempts with exponential backoff and jitter disabled, while OCR and image-caption use 2 total attempts.
+  - Updated `backend/app/infra/pipeline.py` so exhausted non-critical stage failures default to `retryable=true` warnings before the shared finalizer continues, which keeps the warning payload aligned with the retry policy.
+  - Added `backend/tests/test_pipeline_retry_policy.py` and refreshed `backend/tests/test_pipeline_orchestration.py` source guards, then smoke-tested the built backend container by importing the registered Celery tasks and asserting their retry settings at runtime.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_pipeline_orchestration.py`
+  - `backend/tests/test_pipeline_retry_policy.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_orchestration.py backend/tests/test_pipeline_failure_handling.py backend/tests/test_pipeline_retry_policy.py` ✅
+  - `python -m pytest` ✅ (72 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python - <<'PY' ... assert process_links/process_ocr/process_image_caption retry settings ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-037` as passed and added a durable note about task-level retry configuration plus retryable warning behavior after exhausted non-critical retries.
+  - Re-evaluated `EP-005`; it remains `passes: false` because Draft TTL cleanup and the remaining fast-summary/title lifecycle story are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the spec-fixed Celery retry policy on the worker task decorators so future stage implementations inherit the right attempt counts without duplicating retry code inside the task bodies.
+  - Gotchas encountered
+    - Celery `max_retries` counts retries after the initial run, so the spec's 3 total attempts for link processing maps to `max_retries=2`, while 2 total attempts for OCR/caption maps to `max_retries=1`.
+  - Useful context
+    - The current source/runtime coverage now checks both the decorator wiring and the imported task objects, so later OCR/link/caption stories can extend task bodies without silently changing retry behavior.
 ---
 
 ## [2026-03-14 21:10:58 +0300] - EP-005 / US-034

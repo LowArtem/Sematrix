@@ -41,9 +41,9 @@ def test_worker_tasks_define_pipeline_entrypoint_stage_and_finalize_names() -> N
 
     assert '@celery_app.task(bind=True, name="sematrix.start_pipeline")' in worker_source
     assert 'orchestrator = build_pipeline_orchestrator(session=session)' in worker_source
-    assert '@celery_app.task(bind=True, name="sematrix.process_links")' in worker_source
-    assert '@celery_app.task(bind=True, name="sematrix.process_ocr")' in worker_source
-    assert '@celery_app.task(bind=True, name="sematrix.process_image_caption")' in worker_source
+    assert 'name="sematrix.process_links"' in worker_source
+    assert 'name="sematrix.process_ocr"' in worker_source
+    assert 'name="sematrix.process_image_caption"' in worker_source
     assert '@celery_app.task(bind=True, name="sematrix.finalize_pipeline")' in worker_source
     assert '@celery_app.task(bind=True, name="sematrix.pipeline_failed")' in worker_source
     assert '"pipeline_finalization_requested"' in worker_source

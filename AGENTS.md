@@ -128,6 +128,7 @@ Do not move business logic into route handlers or UI code.
 - OCR failure for one image, caption failure for one image, or failure for one link is normally **non-critical**.
 - Non-critical enrichment failures should produce warnings, not automatically fail the whole note.
 - `Error` is reserved for failures that block finalization or make the indexed note state invalid.
+- Celery retry policy is fixed: link-processing gets **3 total attempts** with exponential backoff; OCR and image-caption stages get **2 total attempts**.
 
 ---
 

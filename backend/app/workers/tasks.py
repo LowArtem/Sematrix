@@ -15,6 +15,14 @@ from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
+NETWORK_TASK_AUTORETRY_FOR = (Exception,)
+NETWORK_TASK_RETRY_KWARGS = {"max_retries": 2}
+NETWORK_TASK_RETRY_BACKOFF = True
+NETWORK_TASK_RETRY_JITTER = False
+
+ENRICHMENT_TASK_AUTORETRY_FOR = (Exception,)
+ENRICHMENT_TASK_RETRY_KWARGS = {"max_retries": 1}
+
 
 @celery_app.task(bind=True, name="sematrix.ping")
 def ping(self) -> str:
@@ -55,7 +63,14 @@ def start_pipeline(
         session.close()
 
 
-@celery_app.task(bind=True, name="sematrix.process_links")
+@celery_app.task(
+    bind=True,
+    name="sematrix.process_links",
+    autoretry_for=NETWORK_TASK_AUTORETRY_FOR,
+    retry_kwargs=NETWORK_TASK_RETRY_KWARGS,
+    retry_backoff=NETWORK_TASK_RETRY_BACKOFF,
+    retry_jitter=NETWORK_TASK_RETRY_JITTER,
+)
 def process_links(
     self,
     note_id: str,
@@ -93,7 +108,12 @@ def process_links(
     }
 
 
-@celery_app.task(bind=True, name="sematrix.process_ocr")
+@celery_app.task(
+    bind=True,
+    name="sematrix.process_ocr",
+    autoretry_for=ENRICHMENT_TASK_AUTORETRY_FOR,
+    retry_kwargs=ENRICHMENT_TASK_RETRY_KWARGS,
+)
 def process_ocr(
     self,
     note_id: str,
@@ -131,7 +151,12 @@ def process_ocr(
     }
 
 
-@celery_app.task(bind=True, name="sematrix.process_image_caption")
+@celery_app.task(
+    bind=True,
+    name="sematrix.process_image_caption",
+    autoretry_for=ENRICHMENT_TASK_AUTORETRY_FOR,
+    retry_kwargs=ENRICHMENT_TASK_RETRY_KWARGS,
+)
 def process_image_caption(
     self,
     note_id: str,

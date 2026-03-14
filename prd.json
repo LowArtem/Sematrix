@@ -589,8 +589,8 @@
             "Critical failures after retries can still move the note to Error through pipeline_failed/finalization"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The retry counts are explicitly fixed in the architecture section and must not be replaced with generic defaults."
+          "passes": true,
+          "notes": "The retry counts are explicitly fixed in the architecture section and must not be replaced with generic defaults. The worker tasks now encode the fixed Celery policy directly: link-processing uses 3 total attempts with exponential backoff, OCR/image-caption use 2 total attempts, and exhausted non-critical stage failures are marked retryable warnings before finalization continues."
         },
         {
           "id": "US-038",
@@ -625,7 +625,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, and `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs. Stage guards, full finalization, failure handling, cleanup, and related lifecycle work still remain before the epic can pass."
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs, and the worker tasks now enforce the fixed retry policy for link/OCR/caption stages. Draft cleanup and the remaining fast-summary/title lifecycle work still remain before the epic can pass."
     },
     {
       "id": "EP-006",

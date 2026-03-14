@@ -1197,7 +1197,12 @@ class PipelineFailureHandler:
                 target=warning_target,
                 code=f"{normalize_pipeline_stage_name(failed_task_name) or 'pipeline'}_failed",
                 message=processing_error,
-                retryable=bool(callback_kwargs.get("retryable", False)),
+                retryable=bool(
+                    callback_kwargs.get(
+                        "retryable",
+                        is_noncritical_pipeline_stage(failed_task_name),
+                    )
+                ),
             )
             stored = self._runtime_repository.store_processing_warning(
                 note_id=note_id,
