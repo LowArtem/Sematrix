@@ -1,6 +1,6 @@
 {
   "project": "Sematrix",
-  "branchName": "ralph/sematrix-mvp",
+  "branchName": "ralph/sematrix-mvp-base",
   "description": "Sematrix MVP: a single-user localhost-only note manager with Tiptap editing, folders and tags, inline images and links, local Ollama models, OCR/caption/link enrichment, hybrid RU+EN search, snapshot-safe background indexing, backups, and unit/integration tests.",
   "epics": [
     {
@@ -135,8 +135,8 @@
             "A clean database can be migrated to the current schema"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "The backend stack is fixed to SQLAlchemy 2.x + Alembic + PostgreSQL. Added a shared SQLAlchemy base/engine module in `app.infra`, wired Alembic under `backend/alembic`, and created an initial revision so `alembic upgrade head` succeeds against a clean PostgreSQL database before the concrete schema stories add tables."
+          "passes": false,
+          "notes": "The backend stack is fixed to SQLAlchemy 2.x + Alembic + PostgreSQL. This task is only the migration foundation."
         },
         {
           "id": "US-009",
@@ -150,8 +150,8 @@
             "note_tags enforces uniqueness on (note_id, tag_id)"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "The spec fixes folders as a flat list, tags as normalized lowercase values without spaces, and notes as the single source of current note state. Added typed SQLAlchemy models plus the initial Alembic schema for `folders`, `notes`, `tags`, and `note_tags`, enabled `pgvector`, and validated the migrated schema against a scratch PostgreSQL database."
+          "passes": false,
+          "notes": "The spec fixes folders as a flat list, tags as normalized lowercase values without spaces, and notes as the single source of current note state."
         },
         {
           "id": "US-010",
@@ -164,8 +164,8 @@
             "The schema supports determining whether an asset is still used by any note"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "Files live on disk in ./data/assets. The database stores metadata only. Added typed SQLAlchemy models plus Alembic schema for `assets` and `note_assets`, including metadata-only asset fields, unique `storage_key`, note-to-asset usage tracking, and scratch-database validation of the migrated tables and constraints."
+          "passes": false,
+          "notes": "Files live on disk in ./data/assets. The database stores metadata only. note_assets is mandatory for save synchronization, deletion, snapshotting, and Draft uploads."
         },
         {
           "id": "US-011",
@@ -177,8 +177,8 @@
             "The schema can enforce or support unique (note_id, normalized_url) deduplication"
           ],
           "priority": 2,
-          "passes": true,
-          "notes": "Links are scoped to a specific note in MVP. Global shared link cache is explicitly not required. Added a typed `NoteLink` model plus Alembic schema for per-note URLs, normalized-url deduplication, the fixed link-type enum, and the `link_processing_results.link_id` foreign key, then validated the migrated table and constraints against a scratch PostgreSQL database."
+          "passes": false,
+          "notes": "Links are scoped to a specific note in MVP. Global shared link cache is explicitly not required."
         },
         {
           "id": "US-012",
@@ -190,8 +190,8 @@
             "The table can store started_at, finished_at, total_duration_ms, stage_durations_ms, and processing_error"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "pipeline_runs is mandatory for race protection, snapshot validation, Ready/Error finalization, and timing logs. Added a typed `PipelineRun` model plus Alembic schema with per-note/version uniqueness, UUID snapshot arrays, timing JSON, and scratch-Postgres validation of the migrated columns and constraints."
+          "passes": false,
+          "notes": "pipeline_runs is mandatory for race protection, snapshot validation, Ready/Error finalization, and timing logs."
         },
         {
           "id": "US-013",
@@ -204,8 +204,8 @@
             "The schema supports warnings, statuses, and extracted/generated text fields from the spec"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "Old processing results must never overwrite or replace the current note state. Finalization reads only current-run results. Added typed `AssetProcessingResult` and `LinkProcessingResult` models plus Alembic schema for durable per-run OCR/caption/link outputs, warnings, statuses, and note/version tracking, with scratch-Postgres validation of the migrated columns and uniqueness constraints. `link_processing_results.link_id` is stored as UUID for now and can gain its foreign key when the `note_links` table is introduced."
+          "passes": false,
+          "notes": "Old processing results must never overwrite or replace the current note state. Finalization reads only current-run results."
         },
         {
           "id": "US-014",
@@ -219,13 +219,13 @@
             "Indices exist on note_tags, note_assets, asset_processing_results(note_id, index_version), and link_processing_results(note_id, index_version)"
           ],
           "priority": 1,
-          "passes": true,
-          "notes": "The spec forbids runtime to_tsvector calculation for search and forbids replacing RU+EN concatenation with a custom merged configuration or simple config. Added the required SQLAlchemy and Alembic indexes for note listing, GIN-backed `search_tsv`, relation-table reverse lookups, and `(note_id, index_version)` access on version-aware result tables, then validated the rendered PostgreSQL indexes against a scratch database."
+          "passes": false,
+          "notes": "The spec forbids runtime to_tsvector calculation for search and forbids replacing RU+EN concatenation with a custom merged configuration or simple config."
         }
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. The schema now includes the full MVP table set, including per-note `note_links`, the required RU+EN generated `notes.search_tsv`, `VECTOR(1024)` embeddings, and the `link_processing_results.link_id` foreign key back to `note_links`, all revalidated through scratch-PostgreSQL Alembic migrations."
+      "passes": false,
+      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts."
     },
     {
       "id": "EP-003",
