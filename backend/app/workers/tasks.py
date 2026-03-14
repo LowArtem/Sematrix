@@ -4,7 +4,12 @@ from uuid import UUID
 from app.domain.system import WorkerHeartbeatService
 from app.core import get_logger
 from app.infra import SessionLocal
-from app.infra.pipeline import build_pipeline_finalizer, build_pipeline_orchestrator, build_pipeline_stage_runner
+from app.infra.pipeline import (
+    build_pipeline_failure_handler,
+    build_pipeline_finalizer,
+    build_pipeline_orchestrator,
+    build_pipeline_stage_runner,
+)
 from app.workers.celery_app import celery_app
 
 
@@ -186,8 +191,7 @@ def finalize_pipeline(
     )
     session = SessionLocal()
     try:
-        finalizer = build_pipeline_finalizer(session=session)
-        return finalizer.finalize_pipeline(
+        return build_pipeline_finalizer(session=session).finalize_pipeline(
             note_id=UUID(note_id),
             index_version=index_version,
             pipeline_run_id=UUID(pipeline_run_id),
@@ -219,11 +223,15 @@ def pipeline_failed(
             "pipeline_run_id": pipeline_run_id,
         },
     )
-    return {
-        "status": "accepted",
-        "note_id": note_id,
-        "index_version": index_version,
-        "pipeline_run_id": pipeline_run_id,
-        "callback_args": len(callback_args),
-        "callback_kwargs": sorted(callback_kwargs),
-    }
+    session = SessionLocal()
+    try:
+        return build_pipeline_failure_handler(session=session).handle_failure(
+            note_id=UUID(note_id),
+            index_version=index_version,
+            pipeline_run_id=UUID(pipeline_run_id),
+            request_id=request_id,
+            callback_args=callback_args,
+            callback_kwargs=callback_kwargs,
+        )
+    finally:
+        session.close()

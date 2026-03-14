@@ -8,6 +8,17 @@ from uuid import UUID
 PROCESS_LINKS_TASK = "sematrix.process_links"
 PROCESS_OCR_TASK = "sematrix.process_ocr"
 PROCESS_IMAGE_CAPTION_TASK = "sematrix.process_image_caption"
+TASK_STAGE_NAME_MAP = {
+    PROCESS_LINKS_TASK: "process_links",
+    PROCESS_OCR_TASK: "process_ocr",
+    PROCESS_IMAGE_CAPTION_TASK: "process_image_caption",
+}
+NORMALIZED_STAGE_NAME_MAP = {
+    "process_links": "link_fetch",
+    "process_ocr": "ocr",
+    "process_image_caption": "image_caption",
+}
+NON_CRITICAL_PIPELINE_STAGES = frozenset(NORMALIZED_STAGE_NAME_MAP.values())
 
 
 @dataclass(frozen=True)
@@ -77,3 +88,62 @@ def build_search_text(
             parts.append(normalized_text)
 
     return "\n\n".join(parts)
+
+
+def normalize_pipeline_stage_name(stage_name: str | None) -> str | None:
+    if stage_name is None:
+        return None
+
+    task_stage_name = TASK_STAGE_NAME_MAP.get(stage_name, stage_name)
+    return NORMALIZED_STAGE_NAME_MAP.get(task_stage_name, task_stage_name)
+
+
+def is_noncritical_pipeline_stage(stage_name: str | None) -> bool:
+    normalized_stage_name = normalize_pipeline_stage_name(stage_name)
+    return normalized_stage_name in NON_CRITICAL_PIPELINE_STAGES
+
+
+def build_processing_warning(
+    *,
+    stage: str,
+    target: str,
+    code: str,
+    message: str,
+    retryable: bool,
+) -> dict[str, object]:
+    return {
+        "stage": stage,
+        "target": target,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+    }
+
+
+def merge_processing_warnings(*warning_groups: list[dict[str, object]]) -> list[dict[str, object]]:
+    merged_warnings: list[dict[str, object]] = []
+    seen_warnings: set[tuple[str, str, str, str, bool]] = set()
+
+    for warning_group in warning_groups:
+        for warning in warning_group:
+            warning_key = (
+                str(warning.get("stage", "")),
+                str(warning.get("target", "")),
+                str(warning.get("code", "")),
+                str(warning.get("message", "")),
+                bool(warning.get("retryable", False)),
+            )
+            if warning_key in seen_warnings:
+                continue
+            seen_warnings.add(warning_key)
+            merged_warnings.append(
+                build_processing_warning(
+                    stage=warning_key[0],
+                    target=warning_key[1],
+                    code=warning_key[2],
+                    message=warning_key[3],
+                    retryable=warning_key[4],
+                )
+            )
+
+    return merged_warnings

@@ -575,8 +575,8 @@
             "A note may still become Ready with warnings when final search_text, embedding, and state save succeed"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Examples of non-critical failures are individual link fetch, OCR, caption, or link summary failures. Examples of critical failures are inability to build search_document, write embedding, or finalize the pipeline."
+          "passes": true,
+          "notes": "Examples of non-critical failures are individual link fetch, OCR, caption, or link summary failures. Examples of critical failures are inability to build search_document, write embedding, or finalize the pipeline. `sematrix.pipeline_failed` now reloads runtime state before writing anything, downgrades non-critical stage failures into `processing_warnings` that can still flow through `finalize_pipeline`, and only marks the note plus `pipeline_runs` row `Error` for critical failures or finalization failures."
         },
         {
           "id": "US-037",

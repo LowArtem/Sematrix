@@ -11,7 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import Settings, get_logger, get_settings
-from app.domain.pipeline import build_pipeline_stages, build_search_text, compute_snapshot_hash
+from app.domain.pipeline import (
+    build_pipeline_stages,
+    build_processing_warning,
+    build_search_text,
+    compute_snapshot_hash,
+    is_noncritical_pipeline_stage,
+    merge_processing_warnings,
+    normalize_pipeline_stage_name,
+)
 from app.infra.models import AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
 from app.infra.ollama import OllamaClient
 from app.workers.celery_app import celery_app
@@ -55,6 +63,7 @@ class PipelineFinalizationRuntimeState:
     title: str
     content_text_flat: str
     tag_names: list[str]
+    processing_warnings: list[dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,14 @@ class PipelineRuntimeRepository(Protocol):
         pipeline_run_id: UUID,
     ) -> list[LinkProcessingTextResult]: ...
 
+    def list_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[dict[str, object]]: ...
+
     def finalize_pipeline_run(
         self,
         *,
@@ -119,8 +136,28 @@ class PipelineRuntimeRepository(Protocol):
         search_text: str,
         embedding: list[float],
         summary: str,
+        processing_warnings: list[dict[str, object]],
         total_duration_ms: int,
         stage_durations_ms: dict[str, int],
+    ) -> None: ...
+
+    def store_processing_warning(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warning: dict[str, object],
+    ) -> bool: ...
+
+    def fail_pipeline_run(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        processing_error: str,
+        total_duration_ms: int,
     ) -> None: ...
 
 
@@ -236,6 +273,7 @@ class SqlAlchemyPipelineRuntimeRepository:
             title=note.title,
             content_text_flat=note.content_text_flat,
             tag_names=[tag.name for tag in note.tags],
+            processing_warnings=self._normalize_processing_warnings(note.processing_warnings),
         )
 
     def list_asset_processing_texts(
@@ -291,6 +329,56 @@ class SqlAlchemyPipelineRuntimeRepository:
             for result, url in rows
         ]
 
+    def list_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[dict[str, object]]:
+        warnings: list[dict[str, object]] = []
+
+        asset_results = list(
+            self._session.scalars(
+                select(AssetProcessingResult)
+                .where(
+                    AssetProcessingResult.note_id == note_id,
+                    AssetProcessingResult.index_version == index_version,
+                    AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                )
+                .order_by(AssetProcessingResult.asset_id)
+            )
+        )
+        for result in asset_results:
+            warnings.extend(
+                self._normalize_processing_warnings(
+                    result.warnings,
+                    default_stage="asset_processing",
+                    default_target=str(result.asset_id),
+                )
+            )
+
+        link_rows = self._session.execute(
+            select(LinkProcessingResult, NoteLink.url)
+            .join(NoteLink, NoteLink.id == LinkProcessingResult.link_id)
+            .where(
+                LinkProcessingResult.note_id == note_id,
+                LinkProcessingResult.index_version == index_version,
+                LinkProcessingResult.pipeline_run_id == pipeline_run_id,
+            )
+            .order_by(LinkProcessingResult.link_id)
+        ).all()
+        for result, url in link_rows:
+            warnings.extend(
+                self._normalize_processing_warnings(
+                    result.warnings,
+                    default_stage="link_fetch",
+                    default_target=url,
+                )
+            )
+
+        return merge_processing_warnings(warnings)
+
     def finalize_pipeline_run(
         self,
         *,
@@ -300,6 +388,7 @@ class SqlAlchemyPipelineRuntimeRepository:
         search_text: str,
         embedding: list[float],
         summary: str,
+        processing_warnings: list[dict[str, object]],
         total_duration_ms: int,
         stage_durations_ms: dict[str, int],
     ) -> None:
@@ -319,6 +408,9 @@ class SqlAlchemyPipelineRuntimeRepository:
         note.summary = summary
         note.status = "Ready"
         note.processing_error = None
+        note.processing_warnings = processing_warnings
+        note.has_warnings = bool(processing_warnings)
+        note.warnings_count = len(processing_warnings)
 
         pipeline_run.status = "Ready"
         pipeline_run.finished_at = finished_at
@@ -329,6 +421,93 @@ class SqlAlchemyPipelineRuntimeRepository:
         self._session.add(note)
         self._session.add(pipeline_run)
         self._session.commit()
+
+    def store_processing_warning(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warning: dict[str, object],
+    ) -> bool:
+        note = self._session.get(Note, note_id)
+        pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
+        if note is None or pipeline_run is None:
+            return False
+        if note.index_version != index_version:
+            return False
+        if pipeline_run.note_id != note_id or pipeline_run.index_version != index_version:
+            return False
+
+        merged_warnings = merge_processing_warnings(
+            self._normalize_processing_warnings(note.processing_warnings),
+            [warning],
+        )
+        note.processing_warnings = merged_warnings
+        note.has_warnings = bool(merged_warnings)
+        note.warnings_count = len(merged_warnings)
+
+        self._session.add(note)
+        self._session.commit()
+        return True
+
+    def fail_pipeline_run(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        processing_error: str,
+        total_duration_ms: int,
+    ) -> None:
+        note = self._session.get(Note, note_id)
+        pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
+        if note is None or pipeline_run is None:
+            raise RuntimeError("Pipeline failure state disappeared before commit")
+        if note.index_version != index_version:
+            raise RuntimeError("Pipeline failure attempted to write a stale note version")
+        if pipeline_run.note_id != note_id or pipeline_run.index_version != index_version:
+            raise RuntimeError("Pipeline failure attempted to write a mismatched pipeline run")
+
+        finished_at = datetime.now(timezone.utc)
+
+        note.status = "Error"
+        note.processing_error = processing_error
+
+        pipeline_run.status = "Error"
+        pipeline_run.finished_at = finished_at
+        pipeline_run.total_duration_ms = total_duration_ms
+        pipeline_run.processing_error = processing_error
+
+        self._session.add(note)
+        self._session.add(pipeline_run)
+        self._session.commit()
+
+    def _normalize_processing_warnings(
+        self,
+        warnings: object,
+        *,
+        default_stage: str = "",
+        default_target: str = "",
+    ) -> list[dict[str, object]]:
+        if not isinstance(warnings, list):
+            return []
+
+        normalized_warnings: list[dict[str, object]] = []
+        for warning in warnings:
+            if not isinstance(warning, dict):
+                continue
+            normalized_warnings.append(
+                build_processing_warning(
+                    stage=str(warning.get("stage") or default_stage),
+                    target=str(warning.get("target") or default_target),
+                    code=str(warning.get("code", "")),
+                    message=str(warning.get("message", "")),
+                    retryable=bool(warning.get("retryable", False)),
+                )
+            )
+
+        return normalized_warnings
 
 
 class CeleryPipelineDispatcher:
@@ -792,6 +971,14 @@ class PipelineFinalizer:
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
         )
+        processing_warnings = merge_processing_warnings(
+            runtime_state.processing_warnings,
+            self._runtime_repository.list_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+            ),
+        )
 
         search_document_started_at = perf_counter()
         search_text = build_search_text(
@@ -839,9 +1026,26 @@ class PipelineFinalizer:
             search_text=search_text,
             embedding=embedding,
             summary=summary,
+            processing_warnings=processing_warnings,
             total_duration_ms=total_duration_ms,
             stage_durations_ms=stage_durations_ms,
         )
+
+        for warning in processing_warnings:
+            logger.warning(
+                "pipeline_processing_warning",
+                extra={
+                    "event": "pipeline_processing_warning",
+                    "note_id": str(note_id),
+                    "index_version": index_version,
+                    "request_id": request_id,
+                    "pipeline_run_id": str(pipeline_run_id),
+                    "stage_name": warning.get("stage"),
+                    "target": warning.get("target"),
+                    "warning_code": warning.get("code"),
+                    "retryable": warning.get("retryable"),
+                },
+            )
 
         logger.info(
             "note_processing_finished",
@@ -864,6 +1068,8 @@ class PipelineFinalizer:
             "pipeline_run_id": str(pipeline_run_id),
             "search_text": search_text,
             "summary": summary,
+            "has_warnings": bool(processing_warnings),
+            "warnings_count": len(processing_warnings),
             "total_duration_ms": total_duration_ms,
             "stage_durations_ms": stage_durations_ms,
         }
@@ -911,20 +1117,229 @@ class PipelineFinalizer:
             "summary_final": summary_duration_ms,
         }
 
-        stage_name_map = {
-            "process_links": "link_fetch",
-            "process_ocr": "ocr",
-            "process_image_caption": "image_caption",
-        }
         for stage_result in stage_results:
             raw_stage_name = stage_result.get("stage_name")
             raw_duration = stage_result.get("duration_ms")
             if not isinstance(raw_stage_name, str) or not isinstance(raw_duration, int):
                 continue
-            normalized_stage_name = stage_name_map.get(raw_stage_name, raw_stage_name)
+            normalized_stage_name = normalize_pipeline_stage_name(raw_stage_name) or raw_stage_name
             stage_durations_ms[normalized_stage_name] = raw_duration
 
         return stage_durations_ms
+
+
+class PipelineFailureHandler:
+    def __init__(
+        self,
+        *,
+        runtime_repository: PipelineRuntimeRepository,
+        finalizer: PipelineFinalizer,
+    ) -> None:
+        self._runtime_repository = runtime_repository
+        self._finalizer = finalizer
+
+    def handle_failure(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        callback_args: tuple[object, ...],
+        callback_kwargs: dict[str, object],
+    ) -> dict[str, object]:
+        runtime_state = self._runtime_repository.get_finalization_runtime_state(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+        if runtime_state is None:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        if runtime_state.current_index_version != index_version:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="stale_version",
+            )
+
+        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="pipeline_run_mismatch",
+            )
+
+        failed_task_name = self._extract_failed_task_name(callback_args=callback_args, callback_kwargs=callback_kwargs)
+        processing_error = self._extract_processing_error(
+            callback_args=callback_args,
+            callback_kwargs=callback_kwargs,
+        )
+
+        if is_noncritical_pipeline_stage(failed_task_name):
+            warning_target = self._extract_warning_target(
+                callback_args=callback_args,
+                callback_kwargs=callback_kwargs,
+                fallback_target=str(note_id),
+            )
+            warning = build_processing_warning(
+                stage=normalize_pipeline_stage_name(failed_task_name) or "pipeline",
+                target=warning_target,
+                code=f"{normalize_pipeline_stage_name(failed_task_name) or 'pipeline'}_failed",
+                message=processing_error,
+                retryable=bool(callback_kwargs.get("retryable", False)),
+            )
+            stored = self._runtime_repository.store_processing_warning(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                warning=warning,
+            )
+            if not stored:
+                return self._build_skipped_result(
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    skipped_reason="warning_store_skipped",
+                )
+            return self._finalizer.finalize_pipeline(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                stage_results=[],
+            )
+
+        total_duration_ms = max(
+            int((datetime.now(timezone.utc) - runtime_state.started_at).total_seconds() * 1000),
+            0,
+        )
+        self._runtime_repository.fail_pipeline_run(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            processing_error=processing_error,
+            total_duration_ms=total_duration_ms,
+        )
+        logger.error(
+            "note_processing_finished",
+            extra={
+                "event": "note_processing_finished",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "status": "Error",
+                "processing_error": processing_error,
+                "total_duration_ms": total_duration_ms,
+                "stage_durations_ms": {},
+            },
+        )
+        return {
+            "status": "error",
+            "note_id": str(note_id),
+            "index_version": index_version,
+            "pipeline_run_id": str(pipeline_run_id),
+            "processing_error": processing_error,
+        }
+
+    def _build_skipped_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        skipped_reason: str,
+    ) -> dict[str, object]:
+        logger.info(
+            "pipeline_failure_skipped",
+            extra={
+                "event": "pipeline_failure_skipped",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "status": "skipped",
+                "processing_error": skipped_reason,
+            },
+        )
+        return {
+            "status": "skipped",
+            "note_id": str(note_id),
+            "index_version": index_version,
+            "pipeline_run_id": str(pipeline_run_id),
+            "skipped_reason": skipped_reason,
+        }
+
+    @staticmethod
+    def _extract_failed_task_name(
+        *,
+        callback_args: tuple[object, ...],
+        callback_kwargs: dict[str, object],
+    ) -> str | None:
+        task_name = callback_kwargs.get("failed_task_name")
+        if isinstance(task_name, str) and task_name:
+            return task_name
+
+        for arg in callback_args:
+            candidate = getattr(arg, "task", None)
+            if isinstance(candidate, str) and candidate:
+                return candidate
+
+        return None
+
+    @staticmethod
+    def _extract_warning_target(
+        *,
+        callback_args: tuple[object, ...],
+        callback_kwargs: dict[str, object],
+        fallback_target: str,
+    ) -> str:
+        target = callback_kwargs.get("target")
+        if isinstance(target, str) and target:
+            return target
+
+        for arg in callback_args:
+            candidate = getattr(arg, "target", None)
+            if isinstance(candidate, str) and candidate:
+                return candidate
+
+        return fallback_target
+
+    @staticmethod
+    def _extract_processing_error(
+        *,
+        callback_args: tuple[object, ...],
+        callback_kwargs: dict[str, object],
+    ) -> str:
+        explicit_error = callback_kwargs.get("processing_error")
+        if isinstance(explicit_error, str) and explicit_error.strip():
+            return explicit_error.strip()
+
+        exception = callback_kwargs.get("exc")
+        if isinstance(exception, BaseException):
+            return str(exception)
+
+        for arg in callback_args:
+            if isinstance(arg, BaseException):
+                return str(arg)
+            exception = getattr(arg, "exc", None)
+            if isinstance(exception, BaseException):
+                return str(exception)
+
+        return "Pipeline processing failed"
 
 
 def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrator:
@@ -948,4 +1363,11 @@ def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:
             llm_model=settings.llm_model,
             embed_model=settings.embed_model,
         ),
+    )
+
+
+def build_pipeline_failure_handler(*, session: Session) -> PipelineFailureHandler:
+    return PipelineFailureHandler(
+        runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
+        finalizer=build_pipeline_finalizer(session=session),
     )
