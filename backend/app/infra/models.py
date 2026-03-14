@@ -50,7 +50,7 @@ class Folder(Base):
         server_default=func.now(),
     )
 
-    notes: Mapped[list["Note"]] = relationship(back_populates="folder")
+    notes: Mapped[list["Note"]] = relationship(back_populates="folder", passive_deletes=True)
 
 
 class Note(Base):
@@ -109,13 +109,15 @@ class Note(Base):
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
     assets: Mapped[list["Asset"]] = relationship(secondary="note_assets", back_populates="notes")
     asset_processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
-        back_populates="note"
+        back_populates="note",
+        passive_deletes=True,
     )
-    links: Mapped[list["NoteLink"]] = relationship(back_populates="note")
+    links: Mapped[list["NoteLink"]] = relationship(back_populates="note", passive_deletes=True)
     link_processing_results: Mapped[list["LinkProcessingResult"]] = relationship(
-        back_populates="note"
+        back_populates="note",
+        passive_deletes=True,
     )
-    pipeline_runs: Mapped[list["PipelineRun"]] = relationship(back_populates="note")
+    pipeline_runs: Mapped[list["PipelineRun"]] = relationship(back_populates="note", passive_deletes=True)
     tags: Mapped[list["Tag"]] = relationship(secondary="note_tags", back_populates="notes")
 
 
@@ -151,7 +153,8 @@ class Asset(Base):
 
     notes: Mapped[list[Note]] = relationship(secondary="note_assets", back_populates="assets")
     processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
-        back_populates="asset"
+        back_populates="asset",
+        passive_deletes=True,
     )
 
 
@@ -221,7 +224,10 @@ class NoteLink(Base):
     )
 
     note: Mapped[Note] = relationship(back_populates="links")
-    processing_results: Mapped[list["LinkProcessingResult"]] = relationship(back_populates="link")
+    processing_results: Mapped[list["LinkProcessingResult"]] = relationship(
+        back_populates="link",
+        passive_deletes=True,
+    )
 
 
 class PipelineRun(Base):

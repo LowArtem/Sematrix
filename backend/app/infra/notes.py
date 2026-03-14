@@ -11,7 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.errors import NotFoundError
 from app.domain.note_content import ExtractedLink
-from app.infra.models import Asset, Folder, Note, NoteLink, NoteTag, Tag
+from app.infra.assets import get_asset_path
+from app.infra.models import Asset, Folder, Note, NoteAsset, NoteLink, NoteTag, Tag
 
 
 EMPTY_DOCUMENT = {"type": "doc", "content": []}
@@ -55,6 +56,8 @@ class NoteRepository(Protocol):
 
     def get_note(self, note_id: UUID) -> NoteRecord | None: ...
 
+    def delete_note(self, note_id: UUID) -> None: ...
+
     def save_note(
         self,
         *,
@@ -95,6 +98,21 @@ class SqlAlchemyNoteRepository:
         if note is None:
             return None
         return self._to_record(note)
+
+    def delete_note(self, note_id: UUID) -> None:
+        note = self._get_note_for_delete(note_id)
+        if note is None:
+            raise NotFoundError("Note not found")
+
+        candidate_assets = list(note.assets)
+        self._session.delete(note)
+        self._session.flush()
+
+        asset_storage_keys_to_delete = self._delete_unused_assets(candidate_assets)
+        self._session.commit()
+
+        for storage_key in asset_storage_keys_to_delete:
+            get_asset_path(storage_key).unlink(missing_ok=True)
 
     def save_note(
         self,
@@ -209,6 +227,13 @@ class SqlAlchemyNoteRepository:
             .options(selectinload(Note.tags), selectinload(Note.assets), selectinload(Note.links))
         )
 
+    def _get_note_for_delete(self, note_id: UUID) -> Note | None:
+        return self._session.scalar(
+            select(Note)
+            .where(Note.id == note_id)
+            .options(selectinload(Note.assets))
+        )
+
     def _get_assets(self, asset_ids: list[UUID]) -> list[Asset]:
         if not asset_ids:
             return []
@@ -264,6 +289,24 @@ class SqlAlchemyNoteRepository:
         for existing_link in note.links:
             if existing_link.normalized_url not in kept_normalized_urls:
                 self._session.delete(existing_link)
+
+    def _delete_unused_assets(self, candidate_assets: list[Asset]) -> list[str]:
+        if not candidate_assets:
+            return []
+
+        candidate_asset_ids = [asset.id for asset in candidate_assets]
+        referenced_asset_ids = set(
+            self._session.scalars(select(NoteAsset.asset_id).where(NoteAsset.asset_id.in_(candidate_asset_ids)))
+        )
+
+        unused_storage_keys: list[str] = []
+        for asset in candidate_assets:
+            if asset.id in referenced_asset_ids:
+                continue
+            unused_storage_keys.append(asset.storage_key)
+            self._session.delete(asset)
+
+        return unused_storage_keys
 
     @staticmethod
     def _to_record(note: Note) -> NoteRecord:

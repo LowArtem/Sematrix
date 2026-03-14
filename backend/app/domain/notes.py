@@ -89,6 +89,9 @@ class NoteService:
             raise NotFoundError("Note not found")
         return self._to_result(note)
 
+    def delete_note(self, note_id: UUID) -> None:
+        self._note_repository.delete_note(note_id)
+
     def list_notes(
         self,
         q: str | None,

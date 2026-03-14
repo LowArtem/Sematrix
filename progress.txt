@@ -22,6 +22,43 @@
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
+- For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
+
+## [2026-03-14 20:06:39 +0300] - EP-004 / US-027
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement DELETE /api/notes/{id} with safe relation and asset cleanup
+Thread: CLI run
+- What was implemented
+  - Added `DELETE /api/notes/{note_id}` in `backend/app/api/routes/notes.py`, returning `204 No Content` while reusing the existing note service dependency and unified domain-error handling for unknown note IDs.
+  - Extended `backend/app/domain/notes.py` and `backend/app/infra/notes.py` with permanent note deletion, including orphan-asset detection through `note_assets`, database cleanup of unused `assets` rows, and filesystem cleanup of unreferenced files after commit.
+  - Added `backend/app/infra/assets.py` plus `passive_deletes=True` relationship wiring in `backend/app/infra/models.py` so delete flows can safely rely on database cascades for note links and other versioned metadata without ORM nullification errors.
+- Files changed
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/assets.py`
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_delete_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (43 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... DELETE /api/notes/{id} orphan/shared asset smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-027` as passed and added a durable note about the permanent delete flow, cascade-safe ORM wiring, and orphan-asset cleanup.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, reindex, and asset upload/retrieval stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Database-driven cleanup paths in this repo should pair FK `ON DELETE` rules with ORM `passive_deletes=True` when relationships can be loaded during the same unit of work.
+  - Gotchas encountered
+    - Deleting a loaded `Note` without `passive_deletes=True` on `Note.links` makes SQLAlchemy try to null `note_links.note_id`, which breaks before the intended database cascade can run.
+  - Useful context
+    - The delete path now removes orphan asset files only after the database commit succeeds, while shared assets survive as long as any `note_assets` row still points at them.
+---
 
 ## [2026-03-14 19:58:49 +0300] - EP-004 / US-026
 Epic: Folders, tags, assets, and note CRUD domain flows

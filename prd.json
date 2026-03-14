@@ -427,8 +427,8 @@
             "The endpoint returns 204 No Content"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "MVP deletion is irreversible. Asset liveness is determined strictly via note_assets."
+          "passes": true,
+          "notes": "MVP deletion is irreversible. Asset liveness is determined strictly via note_assets. Added `DELETE /api/notes/{id}` through the existing note service/repository layers so note removal stays permanent, relation cleanup relies on database cascades guarded by `passive_deletes`, and orphaned asset rows/files are removed only after checking whether any `note_assets` references remain."
         },
         {
           "id": "US-028",

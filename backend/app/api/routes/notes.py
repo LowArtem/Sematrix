@@ -32,6 +32,12 @@ def get_note(note_id: UUID, service: NoteService = Depends(get_note_service)) ->
     return _to_note_detail_dto(service.get_note(note_id))
 
 
+@api_notes_router.delete("/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_note(note_id: UUID, service: NoteService = Depends(get_note_service)) -> Response:
+    service.delete_note(note_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @api_notes_router.patch(
     "/{note_id}",
     response_model=NoteDetailDto | AsyncAcceptedDto,
