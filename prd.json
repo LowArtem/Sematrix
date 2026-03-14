@@ -720,8 +720,8 @@
             "If the API is temporarily unavailable, generic web processing may be used as fallback and does not redefine the main design"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The spec allows fallback to ordinary web handling only as a backup scenario for temporary API unavailability."
+          "passes": true,
+          "notes": "The YouTube Data API remains the primary metadata source. Added channel URL lookup support in `app.infra.youtube.YouTubeDataApiClient` for `/channel/...`, `/@handle`, and `/user/...` URLs, persisted structured channel metadata plus derived index text/summary in `sematrix.process_links`, and used the shared SSRF-safe fetcher only as a warning-backed HTML metadata fallback for retryable API failures."
         },
         {
           "id": "US-046",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, and YouTube video metadata retrieval through the official Data API are now in place, but the YouTube channel metadata, webpage/text processing, and warning-surface stories are still open."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, and YouTube video/channel metadata retrieval through the official Data API are now in place, but the webpage/text processing and warning-surface stories are still open."
     },
     {
       "id": "EP-007",

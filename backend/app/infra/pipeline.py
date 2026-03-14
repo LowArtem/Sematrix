@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html.parser import HTMLParser
+from http import HTTPStatus
+from html import unescape
+import re
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Protocol
@@ -21,6 +25,7 @@ from app.domain.pipeline import (
     normalize_pipeline_stage_name,
 )
 from app.infra.assets import get_asset_path
+from app.infra.link_fetcher import LinkFetchError, SafeLinkFetcher
 from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
 from app.infra.ocr import OcrClientError, PaddleOcrClient
 from app.infra.ollama import OllamaClient, OllamaClientError
@@ -95,6 +100,76 @@ class LinkProcessingTextResult:
     page_title: str
     extracted_text: str
     generated_summary: str
+
+
+@dataclass(frozen=True)
+class WebPageFallbackResult:
+    page_title: str
+    extracted_text: str
+    generated_summary: str
+    metadata_json: dict[str, object]
+    content_type: str | None
+
+
+class HtmlMetadataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.page_title = ""
+        self.meta_description = ""
+        self._inside_title = False
+        self._title_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {name.lower(): value or "" for name, value in attrs}
+        if tag.lower() == "title":
+            self._inside_title = True
+            return
+        if tag.lower() != "meta" or self.meta_description:
+            return
+
+        name = attributes.get("name", "").strip().lower()
+        property_name = attributes.get("property", "").strip().lower()
+        if name not in {"description"} and property_name not in {"og:description"}:
+            return
+
+        content = attributes.get("content", "").strip()
+        if content:
+            self.meta_description = content
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "title":
+            self._inside_title = False
+            if not self.page_title:
+                self.page_title = " ".join(chunk.strip() for chunk in self._title_chunks if chunk.strip()).strip()
+
+    def handle_data(self, data: str) -> None:
+        if self._inside_title:
+            self._title_chunks.append(data)
+
+
+_CHARSET_RE = re.compile(r"charset=([A-Za-z0-9._-]+)", re.IGNORECASE)
+
+
+def _decode_link_body(body: bytes, *, content_type: str | None) -> str:
+    encoding = "utf-8"
+    if content_type:
+        charset_match = _CHARSET_RE.search(content_type)
+        if charset_match:
+            encoding = charset_match.group(1)
+
+    try:
+        return body.decode(encoding, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def _extract_html_metadata(document: str) -> tuple[str, str]:
+    parser = HtmlMetadataParser()
+    parser.feed(document)
+    parser.close()
+    page_title = unescape(parser.page_title).strip()
+    meta_description = unescape(parser.meta_description).strip()
+    return page_title, meta_description
 
 
 class PipelineRuntimeRepository(Protocol):
@@ -892,11 +967,13 @@ class PipelineStageRunner:
         ocr_client: PaddleOcrClient,
         ollama_client: OllamaClient,
         youtube_client: YouTubeDataApiClient,
+        link_fetcher: SafeLinkFetcher,
     ) -> None:
         self._runtime_repository = runtime_repository
         self._ocr_client = ocr_client
         self._ollama_client = ollama_client
         self._youtube_client = youtube_client
+        self._link_fetcher = link_fetcher
 
     def process_links(
         self,
@@ -956,7 +1033,7 @@ class PipelineStageRunner:
                 )
                 continue
 
-            if link.link_type != "youtube_video":
+            if link.link_type not in {"youtube_video", "youtube_channel"}:
                 skipped_count += 1
                 self._log_target_skip(
                     stage_name="process_links",
@@ -976,26 +1053,38 @@ class PipelineStageRunner:
             generated_summary = ""
             metadata_json: dict[str, object] = {}
             fetch_status = "error"
-            content_type = "application/vnd.youtube.video+json"
+            content_type: str | None = None
 
             try:
-                metadata = self._youtube_client.fetch_video_metadata(url=link.url)
-                page_title = metadata.title
-                extracted_text = metadata.build_index_text()
-                generated_summary = metadata.build_summary()
-                metadata_json = metadata.to_metadata_dict()
-                fetch_status = "done"
+                if link.link_type == "youtube_video":
+                    metadata = self._youtube_client.fetch_video_metadata(url=link.url)
+                    page_title = metadata.title
+                    extracted_text = metadata.build_index_text()
+                    generated_summary = metadata.build_summary()
+                    metadata_json = metadata.to_metadata_dict()
+                    fetch_status = "done"
+                    content_type = "application/vnd.youtube.video+json"
+                else:
+                    (
+                        page_title,
+                        extracted_text,
+                        generated_summary,
+                        metadata_json,
+                        fetch_status,
+                        warnings,
+                        content_type,
+                    ) = self._process_youtube_channel_link(url=link.url)
             except YouTubeDataApiClientError as exc:
                 warnings = [
                     build_processing_warning(
                         stage="link_fetch",
                         target=link.url,
-                        code="youtube_video_fetch_failed",
+                        code=f"{link.link_type}_fetch_failed",
                         message=str(exc),
                         retryable=exc.retryable,
                     )
                 ]
-                warning_count += 1
+            warning_count += len(warnings)
 
             self._runtime_repository.store_link_result(
                 note_id=note_id,
@@ -1033,6 +1122,83 @@ class PipelineStageRunner:
             "warnings_count": warning_count,
             "skipped": False,
         }
+
+    def _process_youtube_channel_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        metadata = None
+        try:
+            metadata = self._youtube_client.fetch_channel_metadata(url=url)
+        except YouTubeDataApiClientError as exc:
+            if not exc.retryable:
+                raise
+
+            fallback = self._fetch_web_fallback_for_youtube_channel(url=url)
+            warnings = [
+                build_processing_warning(
+                    stage="link_fetch",
+                    target=url,
+                    code="youtube_channel_api_fallback",
+                    message=f"YouTube Data API was temporarily unavailable; used web fallback instead: {exc}",
+                    retryable=False,
+                )
+            ]
+            return (
+                fallback.page_title,
+                fallback.extracted_text,
+                fallback.generated_summary,
+                fallback.metadata_json,
+                "done",
+                warnings,
+                fallback.content_type,
+            )
+
+        if metadata is None:
+            raise YouTubeDataApiClientError("YouTube channel metadata processing returned no result", retryable=True)
+
+        return (
+            metadata.title,
+            metadata.build_index_text(),
+            metadata.build_summary(),
+            metadata.to_metadata_dict(),
+            "done",
+            [],
+            "application/vnd.youtube.channel+json",
+        )
+
+    def _fetch_web_fallback_for_youtube_channel(self, *, url: str) -> WebPageFallbackResult:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(
+                f"Fallback web fetch failed for {url}: HTTP {response.status_code}"
+            )
+
+        decoded_body = _decode_link_body(response.body, content_type=response.content_type)
+        page_title, meta_description = _extract_html_metadata(decoded_body)
+        if not page_title and not meta_description:
+            raise LinkFetchError(f"Fallback web fetch returned no usable metadata for {url}")
+
+        extracted_text_parts = [page_title, meta_description, response.final_url]
+        extracted_text = "\n".join(part for part in extracted_text_parts if part)
+        generated_summary = meta_description or f'YouTube channel page "{page_title}".'
+        metadata_json = {
+            "source": "web_fallback",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "page_title": page_title,
+            "meta_description": meta_description,
+        }
+        return WebPageFallbackResult(
+            page_title=page_title,
+            extracted_text=extracted_text,
+            generated_summary=generated_summary,
+            metadata_json=metadata_json,
+            content_type=response.content_type,
+        )
 
     def process_ocr(
         self,
@@ -1987,6 +2153,11 @@ def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
         youtube_client=YouTubeDataApiClient(
             api_key=settings.youtube_api_key,
             timeout_sec=settings.link_fetch_timeout_sec,
+        ),
+        link_fetcher=SafeLinkFetcher(
+            timeout_sec=settings.link_fetch_timeout_sec,
+            max_response_bytes=settings.max_link_response_mb * 1024 * 1024,
+            max_redirects=settings.link_max_redirects,
         ),
     )
 

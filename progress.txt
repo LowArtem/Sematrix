@@ -40,6 +40,42 @@
 - Normalize extracted note URLs before syncing `note_links` by lowercasing scheme/host, removing fragments/default ports, and sorting query params so plain-text URLs and link marks collapse onto the same `normalized_url`.
 - Keep SSRF-safe link fetching in `app/infra/link_fetcher.py`, with a no-redirect opener plus per-hop scheme/port/DNS revalidation and streamed size/time limits before any link-specific parser touches the body.
 - Keep YouTube Data API calls in `app/infra/youtube.py`, and persist both structured metadata plus derived index text/summary on `link_processing_results` so finalization can consume official API output without HTML scraping.
+- For `youtube_channel` links, keep the YouTube Data API as the default path and use the shared SSRF-safe fetcher only for retryable API-failure fallback, recording that downgrade as a warning instead of changing the primary integration design.
+
+## [2026-03-15 01:27:35 +0300] - EP-006 / US-045
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement YouTube channel metadata retrieval and fallback behavior
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/youtube.py` with `YouTubeChannelMetadata`, channel URL lookup parsing, and `fetch_channel_metadata(...)` so channel links now use YouTube Data API v3 as their primary metadata source.
+  - Updated `backend/app/infra/pipeline.py` so `sematrix.process_links` processes both `youtube_video` and `youtube_channel` snapshot links, persists channel metadata plus derived index text/summary, and falls back to SSRF-safe HTML title/description extraction only for retryable channel API failures while recording a warning.
+  - Added/updated YouTube-focused tests in `backend/tests/test_youtube_api.py`, `backend/tests/test_pipeline_youtube_video_stage.py`, and `backend/tests/test_pipeline_youtube_channel_stage.py`, and preserved the reusable fallback rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/youtube.py`
+  - `backend/tests/test_pipeline_youtube_channel_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `backend/tests/test_youtube_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_youtube_api.py backend/tests/test_pipeline_youtube_video_stage.py backend/tests/test_pipeline_youtube_channel_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (110 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-045` as passed and added a durable note about channel lookup support, channel metadata persistence, and retryable-failure fallback through the shared safe fetcher.
+  - Re-evaluated `EP-006`; it remains `passes: false` because text-file/webpage processing and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - For `youtube_channel` links, keep the YouTube Data API as the default path and only downgrade to SSRF-safe web metadata fallback on retryable failures, preserving the API-first design while still keeping indexing alive.
+  - Gotchas encountered
+    - The fallback path should extract only lightweight HTML metadata here; full webpage main-text extraction still belongs to the later generic webpage-processing story.
+  - Useful context
+    - `sematrix.process_links` now treats both YouTube link types as first-class snapshot targets, but non-YouTube `web` and `text_file` links are still intentionally skipped until the next EP-006 stories.
+---
 
 ## [2026-03-15 01:19:53 +0300] - EP-006 / US-044
 Epic: Image OCR/caption and secure link processing

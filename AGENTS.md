@@ -71,6 +71,7 @@ Backend foundation convention:
 - Keep OCR calls inside `backend/app/infra/ocr.py`, and have OCR/caption stages update only their own fields plus stage-specific warnings on shared `asset_processing_results` rows so retries do not clobber sibling stage outputs.
 - Keep SSRF-safe link fetching inside `backend/app/infra/link_fetcher.py`, and make every hop revalidate scheme, port, DNS-resolved IPs, redirect count, size limit, and timeout before any link-specific processing consumes the response.
 - Keep YouTube Data API calls inside `backend/app/infra/youtube.py`, and have YouTube link stages persist both structured metadata and derived text/summary fields on `link_processing_results` so final indexing can consume the API result without scraping HTML in worker tasks.
+- For `youtube_channel` links, keep the YouTube Data API as the primary path and only fall back to SSRF-safe web fetching on retryable API failures, storing the fallback as a warning-backed exception path instead of redefining the main design.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.

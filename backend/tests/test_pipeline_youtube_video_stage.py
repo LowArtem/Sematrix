@@ -11,12 +11,12 @@ def test_pipeline_stage_runner_processes_youtube_video_links_via_api_client() ->
     assert "class SnapshotLinkRecord:" in pipeline_source
     assert "def list_snapshot_links(" in pipeline_source
     assert "def store_link_result(" in pipeline_source
-    assert 'if link.link_type != "youtube_video":' in pipeline_source
+    assert 'if link.link_type not in {"youtube_video", "youtube_channel"}:' in pipeline_source
     assert 'metadata = self._youtube_client.fetch_video_metadata(url=link.url)' in pipeline_source
     assert 'content_type = "application/vnd.youtube.video+json"' in pipeline_source
     assert 'metadata_json = metadata.to_metadata_dict()' in pipeline_source
     assert 'generated_summary = metadata.build_summary()' in pipeline_source
-    assert 'code="youtube_video_fetch_failed"' in pipeline_source
+    assert 'code=f"{link.link_type}_fetch_failed"' in pipeline_source
 
 
 def test_pipeline_stage_runner_factory_wires_the_youtube_client() -> None:
