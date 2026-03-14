@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
@@ -16,11 +18,13 @@ class OllamaClient:
         base_url: str,
         llm_model: str,
         embed_model: str,
+        vision_model: str,
         timeout_sec: int = 60,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._llm_model = llm_model
         self._embed_model = embed_model
+        self._vision_model = vision_model
         self._timeout_sec = timeout_sec
 
     def generate_summary(self, *, search_text: str) -> str:
@@ -73,6 +77,30 @@ class OllamaClient:
         response_text = payload.get("response")
         if not isinstance(response_text, str):
             raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
+    def generate_image_caption(self, *, image_path: Path) -> str:
+        if not image_path.exists():
+            raise OllamaClientError(f"Image caption asset file not found: {image_path}")
+
+        encoded_image = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        payload = self._post_json(
+            "/api/generate",
+            {
+                "model": self._vision_model,
+                "prompt": (
+                    "/no_think\n"
+                    "Describe this note image in 1-3 meaningful plain-text sentences. "
+                    "Return only the caption text, with no bullets or labels."
+                ),
+                "images": [encoded_image],
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+        )
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama image caption response did not include text")
         return response_text.strip()
 
     def embed_text(self, *, text: str) -> list[float]:

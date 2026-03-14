@@ -23,7 +23,7 @@ from app.domain.pipeline import (
 from app.infra.assets import get_asset_path
 from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
 from app.infra.ocr import OcrClientError, PaddleOcrClient
-from app.infra.ollama import OllamaClient
+from app.infra.ollama import OllamaClient, OllamaClientError
 from app.workers.celery_app import celery_app
 
 
@@ -174,6 +174,18 @@ class PipelineRuntimeRepository(Protocol):
         asset_id: UUID,
         ocr_text: str,
         ocr_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
+
+    def store_asset_caption_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        caption_text: str,
+        caption_status: str,
         warnings: list[dict[str, object]],
     ) -> None: ...
 
@@ -539,6 +551,44 @@ class SqlAlchemyPipelineRuntimeRepository:
         self._session.add(result)
         self._session.commit()
 
+    def store_asset_caption_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        caption_text: str,
+        caption_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(AssetProcessingResult).where(
+                AssetProcessingResult.note_id == note_id,
+                AssetProcessingResult.index_version == index_version,
+                AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                AssetProcessingResult.asset_id == asset_id,
+            )
+        )
+        if result is None:
+            result = AssetProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                asset_id=asset_id,
+                index_version=index_version,
+            )
+
+        preserved_warnings = [
+            warning
+            for warning in self._normalize_processing_warnings(result.warnings)
+            if str(warning.get("stage")) != "image_caption"
+        ]
+        result.caption_text = caption_text
+        result.caption_status = caption_status
+        result.warnings = merge_processing_warnings(preserved_warnings, warnings)
+        self._session.add(result)
+        self._session.commit()
+
     def fail_pipeline_run(
         self,
         *,
@@ -741,9 +791,11 @@ class PipelineStageRunner:
         *,
         runtime_repository: PipelineRuntimeRepository,
         ocr_client: PaddleOcrClient,
+        ollama_client: OllamaClient,
     ) -> None:
         self._runtime_repository = runtime_repository
         self._ocr_client = ocr_client
+        self._ollama_client = ollama_client
 
     def process_links(
         self,
@@ -796,6 +848,7 @@ class PipelineStageRunner:
             snapshot_asset_ids=runtime_state.snapshot_asset_ids,
         )
         filtered_assets = self._filter_snapshot_assets(
+            stage_name="process_ocr",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
@@ -884,18 +937,108 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_image_caption",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_asset_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_asset_ids(
-                note_id=note_id,
-                snapshot_asset_ids=snapshot_target_ids,
-            ),
         )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_image_caption",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        assets = self._runtime_repository.list_snapshot_assets(
+            note_id=note_id,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        filtered_assets = self._filter_snapshot_assets(
+            stage_name="process_image_caption",
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            assets=assets,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        assets_by_id = {asset.asset_id: asset for asset in filtered_assets}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for asset_id in runtime_state.snapshot_asset_ids:
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_image_caption",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=asset_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            processed_count += 1
+            image_path = get_asset_path(asset.storage_key)
+            warnings: list[dict[str, object]] = []
+            try:
+                caption_text = self._ollama_client.generate_image_caption(image_path=image_path)
+                caption_status = "done"
+            except OllamaClientError as exc:
+                caption_text = ""
+                caption_status = "error"
+                warnings = [
+                    build_processing_warning(
+                        stage="image_caption",
+                        target=str(asset.asset_id),
+                        code="image_caption_failed",
+                        message=str(exc),
+                        retryable=False,
+                    )
+                ]
+                warning_count += 1
+
+            self._runtime_repository.store_asset_caption_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                asset_id=asset.asset_id,
+                caption_text=caption_text,
+                caption_status=caption_status,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_image_caption",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_image_caption",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
 
     def _run_stage(
         self,
@@ -1039,6 +1182,7 @@ class PipelineStageRunner:
     def _filter_snapshot_assets(
         self,
         *,
+        stage_name: str,
         note_id: UUID,
         index_version: int,
         pipeline_run_id: UUID,
@@ -1048,7 +1192,7 @@ class PipelineStageRunner:
     ) -> list[SnapshotAssetRecord]:
         filtered_asset_ids = set(
             self._filter_snapshot_target_ids(
-                stage_name="process_ocr",
+                stage_name=stage_name,
                 note_id=note_id,
                 index_version=index_version,
                 pipeline_run_id=pipeline_run_id,
@@ -1590,9 +1734,16 @@ def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrat
 
 
 def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
+    settings = get_settings()
     return PipelineStageRunner(
         runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
         ocr_client=PaddleOcrClient(),
+        ollama_client=OllamaClient(
+            base_url=settings.ollama_url,
+            llm_model=settings.llm_model,
+            embed_model=settings.embed_model,
+            vision_model=settings.vision_model,
+        ),
     )
 
 
@@ -1604,6 +1755,7 @@ def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:
             base_url=settings.ollama_url,
             llm_model=settings.llm_model,
             embed_model=settings.embed_model,
+            vision_model=settings.vision_model,
         ),
     )
 

@@ -36,6 +36,41 @@
 - For Draft TTL cleanup, evaluate emptiness from parsed `content_json` with the shared meaningful-content rule instead of raw `note_assets` rows alone, so abandoned pre-save uploads remain cleanup-eligible while orphaned asset files can still be removed.
 - Keep save-time title and fast-summary generation behind an injected `app/infra/ollama.py` client in `NoteService`, so meaningful saves can prefill card data and persist non-fatal generation warnings while tests swap in fakes without touching route handlers.
 - Keep OCR calls in `app/infra/ocr.py`, and have OCR/caption stages update only their own columns plus stage-specific warnings on shared `asset_processing_results` rows so reruns do not erase sibling stage outputs.
+- Keep image caption generation in `app/infra/ollama.py` and inject that client into `PipelineStageRunner`, so `process_image_caption` can reuse the configured vision model while tests swap in fakes without moving caption logic into Celery tasks.
+
+## [2026-03-15 00:58:16 +0300] - EP-006 / US-041
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement the process_image_caption stage for all snapshot assets
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/ollama.py` with a non-thinking image-caption request that sends snapshot image bytes to the configured local vision model and returns plain-text 1-3 sentence captions.
+  - Updated `backend/app/infra/pipeline.py` so `sematrix.process_image_caption` reloads snapshot-scoped assets, resolves stored asset file paths, persists `caption_text` plus `caption_status` into `asset_processing_results`, and preserves OCR warnings/results while replacing only image-caption stage data.
+  - Added `backend/tests/test_pipeline_image_caption_stage.py` source guards and smoke-tested the stage against scratch PostgreSQL with a fake Ollama client that verifies durable caption persistence plus non-critical warning downgrade behavior.
+- Files changed
+  - `backend/app/api/dependencies.py`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_image_caption_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (84 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner image-caption smoke test with fake Ollama client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-041` as passed and added a durable note about snapshot-scoped asset loading, the Ollama vision caption client, durable `asset_processing_results` writes, and per-asset warning downgrade behavior.
+  - Re-evaluated `EP-006`; it remains `passes: false` because link classification/fetching, YouTube metadata, webpage/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep image caption generation in the shared Ollama infra adapter and let the caption stage update only `caption_*` fields plus stage-specific warnings on `asset_processing_results`.
+  - Gotchas encountered
+    - The caption stage must preserve existing OCR warnings/results on the same `asset_processing_results` row; otherwise reruns can accidentally erase sibling stage data.
+  - Useful context
+    - `process_image_caption` now returns only stage metadata plus counts while the full captions stay in PostgreSQL, preserving the small-Celery-payload rule.
+---
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing

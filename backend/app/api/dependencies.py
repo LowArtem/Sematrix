@@ -55,5 +55,6 @@ def get_note_service(session: Session = Depends(get_db_session)) -> NoteService:
             base_url=settings.ollama_url,
             llm_model=settings.llm_model,
             embed_model=settings.embed_model,
+            vision_model=settings.vision_model,
         ),
     )

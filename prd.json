@@ -664,8 +664,8 @@
             "Caption failure for one asset becomes a warning and does not abort the whole pipeline"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes qwen3.5:9b as the local vision model set and requires image captions to contribute to search."
+          "passes": true,
+          "notes": "The spec fixes qwen3.5:9b as the local vision model set and requires image captions to contribute to search. `sematrix.process_image_caption` now reloads only snapshot-scoped assets, resolves each asset file path through `app.infra.assets`, generates a non-thinking image caption through the Ollama vision client, persists `caption_text` plus `caption_status` on `asset_processing_results`, and downgrades single-asset caption failures into per-asset warnings without aborting the rest of the stage."
         },
         {
           "id": "US-042",
