@@ -21,6 +21,40 @@
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 
+## [2026-03-14 19:39:39 +0300] - EP-004 / US-024
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement GET /api/notes/{id} to return full note detail
+Thread: CLI run
+- What was implemented
+  - Added `GET /api/notes/{note_id}` in `backend/app/api/routes/notes.py`, reusing the existing `NoteDetailDto` mapper so the editor-facing detail contract matches the create response shape.
+  - Extended the note domain/repository flow in `backend/app/domain/notes.py` and `backend/app/infra/notes.py` with single-note loading and a note-specific `NotFoundError`, keeping the route thin and the 404 handling inside the shared API error layer.
+  - Expanded `backend/tests/test_note_create_api.py` and ran a scratch-Postgres container smoke test that creates a Draft note, fetches it back through `GET /api/notes/{id}`, and verifies the unified JSON 404 payload for an unknown note ID.
+- Files changed
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_create_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (34 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python -c "... POST /api/notes + GET /api/notes/{id} smoke test ..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-024` as passed and added a durable note about the routed note-detail lookup and unified 404 handling for unknown note IDs.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, note listing/save/delete/reindex, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Reuse the shared `NoteDetailDto` mapper for note create and note detail routes so the editor sees one stable payload shape.
+  - Gotchas encountered
+    - The domain-level `NotFoundError` message is preserved by the shared API error handler, so runtime smoke checks should assert the note-specific 404 message instead of Starlette's generic one.
+  - Useful context
+    - `GET /api/notes/{id}` now returns the same Draft defaults as `POST /api/notes`, which gives the frontend a consistent full-detail payload on both create and reload paths.
+---
+
 ## [2026-03-14 19:30:29 +0300] - EP-004 / US-021
 Epic: Folders, tags, assets, and note CRUD domain flows
 Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags

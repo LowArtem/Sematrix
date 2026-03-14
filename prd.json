@@ -384,8 +384,8 @@
             "404 is returned in the unified error format for unknown note IDs"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This is the full editor-facing read contract. Internal pipeline state must not leak through the public DTO."
+          "passes": true,
+          "notes": "This is the full editor-facing read contract. Internal pipeline state must not leak through the public DTO. Added `/api/notes/{id}` through the existing note service/repository path so the editor can load the full `NoteDetailDto` for one note, while unknown note IDs return the unified 404 JSON error payload through the shared domain error handling."
         },
         {
           "id": "US-025",

@@ -34,6 +34,8 @@ class NoteRecord:
 class NoteRepository(Protocol):
     def create_note(self) -> NoteRecord: ...
 
+    def get_note(self, note_id: UUID) -> NoteRecord | None: ...
+
 
 class SqlAlchemyNoteRepository:
     def __init__(self, session: Session) -> None:
@@ -44,6 +46,12 @@ class SqlAlchemyNoteRepository:
         self._session.add(note)
         self._session.commit()
         self._session.refresh(note)
+        return self._to_record(note)
+
+    def get_note(self, note_id: UUID) -> NoteRecord | None:
+        note = self._session.get(Note, note_id)
+        if note is None:
+            return None
         return self._to_record(note)
 
     @staticmethod

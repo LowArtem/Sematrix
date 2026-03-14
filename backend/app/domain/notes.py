@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from app.domain.errors import NotFoundError
 from app.infra.notes import NoteRecord, NoteRepository
 
 
@@ -32,6 +33,12 @@ class NoteService:
 
     def create_note(self) -> NoteResult:
         return self._to_result(self._note_repository.create_note())
+
+    def get_note(self, note_id: UUID) -> NoteResult:
+        note = self._note_repository.get_note(note_id)
+        if note is None:
+            raise NotFoundError("Note not found")
+        return self._to_result(note)
 
     @staticmethod
     def _to_result(note: NoteRecord) -> NoteResult:

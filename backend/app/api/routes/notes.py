@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
+from uuid import UUID
 
 from app.api.dependencies import get_note_service
 from app.api.dto import NoteDetailDto, TagRefDto
@@ -13,6 +14,11 @@ api_notes_router = APIRouter(prefix="/notes", tags=["notes"])
 @api_notes_router.post("", response_model=NoteDetailDto, status_code=status.HTTP_201_CREATED)
 def create_note(service: NoteService = Depends(get_note_service)) -> NoteDetailDto:
     return _to_note_detail_dto(service.create_note())
+
+
+@api_notes_router.get("/{note_id}", response_model=NoteDetailDto)
+def get_note(note_id: UUID, service: NoteService = Depends(get_note_service)) -> NoteDetailDto:
+    return _to_note_detail_dto(service.get_note(note_id))
 
 
 def _to_note_detail_dto(note: NoteResult) -> NoteDetailDto:
