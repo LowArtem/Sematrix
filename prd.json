@@ -694,8 +694,8 @@
             "Connect/read timeout follows LINK_FETCH_TIMEOUT_SEC"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This is a hard security requirement. The spec explicitly forbids localhost/private-range access even through redirects."
+          "passes": true,
+          "notes": "This is a hard security requirement. The spec explicitly forbids localhost/private-range access even through redirects. Added `app.infra.link_fetcher.SafeLinkFetcher`, which uses a no-redirect opener, validates only `http/https` on ports 80/443, resolves and rejects non-public IPv4/IPv6 targets before each hop, revalidates every redirect, streams responses under `MAX_LINK_RESPONSE_MB`, and applies `LINK_FETCH_TIMEOUT_SEC` to each request."
         },
         {
           "id": "US-044",
@@ -767,7 +767,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, and save-time note-link extraction/classification are now in place, but the SSRF-safe fetcher, YouTube metadata retrieval, webpage/text processing, and warning-surface stories are still open."
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, and the shared SSRF-safe fetcher are now in place, but the YouTube metadata retrieval, webpage/text processing, and warning-surface stories are still open."
     },
     {
       "id": "EP-007",

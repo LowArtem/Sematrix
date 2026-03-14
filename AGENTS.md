@@ -69,6 +69,7 @@ Backend foundation convention:
 - Keep file-backed asset persistence in `backend/app/infra/assets.py`, and remove any just-written file on database rollback so `assets` / `note_assets` rows cannot drift from the filesystem.
 - Keep local Ollama HTTP calls inside `backend/app/infra` adapters and inject those clients into note-save or pipeline services so tests can swap in fakes without moving title/summary/embedding logic into route handlers or worker tasks.
 - Keep OCR calls inside `backend/app/infra/ocr.py`, and have OCR/caption stages update only their own fields plus stage-specific warnings on shared `asset_processing_results` rows so retries do not clobber sibling stage outputs.
+- Keep SSRF-safe link fetching inside `backend/app/infra/link_fetcher.py`, and make every hop revalidate scheme, port, DNS-resolved IPs, redirect count, size limit, and timeout before any link-specific processing consumes the response.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.

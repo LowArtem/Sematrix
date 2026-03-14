@@ -38,6 +38,7 @@
 - Keep OCR calls in `app/infra/ocr.py`, and have OCR/caption stages update only their own columns plus stage-specific warnings on shared `asset_processing_results` rows so reruns do not erase sibling stage outputs.
 - Keep image caption generation in `app/infra/ollama.py` and inject that client into `PipelineStageRunner`, so `process_image_caption` can reuse the configured vision model while tests swap in fakes without moving caption logic into Celery tasks.
 - Normalize extracted note URLs before syncing `note_links` by lowercasing scheme/host, removing fragments/default ports, and sorting query params so plain-text URLs and link marks collapse onto the same `normalized_url`.
+- Keep SSRF-safe link fetching in `app/infra/link_fetcher.py`, with a no-redirect opener plus per-hop scheme/port/DNS revalidation and streamed size/time limits before any link-specific parser touches the body.
 
 ## [2026-03-15 01:03:10 +0300] - EP-006 / US-042
 Epic: Image OCR/caption and secure link processing
@@ -67,6 +68,37 @@ Thread: CLI run
     - The `link_type` enum includes `other`, so extension-based binary/document links should not silently fall through to `web` when they are clearly non-page resources.
   - Useful context
     - `parse_note_content(...)` remains the single Save-time source for flattened text, `assetId` extraction, and note-link extraction/classification, so later link-processing stages can trust the snapshot rows created from `note_links`.
+---
+
+## [2026-03-15 01:09:48 +0300] - EP-006 / US-043
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement an SSRF-safe link fetcher with scheme, DNS, redirect, port, size, and timeout enforcement
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/link_fetcher.py` with a reusable `SafeLinkFetcher` that blocks non-`http/https` schemes and non-80/443 ports, strips fragments, resolves DNS before each request, rejects localhost/private/loopback/link-local/non-global IPv4 and IPv6 targets, and disables automatic redirects so every hop is revalidated explicitly.
+  - Implemented streamed response reading with `Content-Length` prechecks, `MAX_LINK_RESPONSE_MB` enforcement during body reads, and per-request timeout propagation for both initial requests and redirects.
+  - Added `backend/tests/test_link_fetcher.py` with source guards plus runtime unit coverage for invalid scheme/port rejection, non-public DNS rejection before network access, redirect revalidation, timeout forwarding, and body-size enforcement.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/link_fetcher.py`
+  - `backend/tests/test_link_fetcher.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_link_fetcher.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (99 passed)
+- PRD updates made
+  - Marked `US-043` as passed and added a durable note about the shared no-redirect SSRF-safe fetcher, per-hop DNS/IP validation, and streamed size/timeout enforcement.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the YouTube metadata, text-file/webpage processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep SSRF-safe link fetching in one infra adapter so every later YouTube/web/text link path reuses the same per-hop scheme/port/DNS/size/timeout policy.
+  - Gotchas encountered
+    - Resolver injection in tests still needs the fetcher to validate the returned IPs, or a fake resolver can accidentally bypass the non-public-address guard.
+  - Useful context
+    - `SafeLinkFetcher` currently returns status, final URL, content type, body bytes, and redirect count, which is enough for later link-stage processors to branch on content type without reimplementing the safety envelope.
 ---
 
 ## [2026-03-15 00:58:16 +0300] - EP-006 / US-041
