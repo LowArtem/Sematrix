@@ -135,8 +135,8 @@
             "A clean database can be migrated to the current schema"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The backend stack is fixed to SQLAlchemy 2.x + Alembic + PostgreSQL. This task is only the migration foundation."
+          "passes": true,
+          "notes": "The backend stack is fixed to SQLAlchemy 2.x + Alembic + PostgreSQL. Added a shared SQLAlchemy base/engine module in `app.infra`, wired Alembic under `backend/alembic`, and created an initial revision so `alembic upgrade head` succeeds against a clean PostgreSQL database before the concrete schema stories add tables."
         },
         {
           "id": "US-009",

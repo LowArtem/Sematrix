@@ -7,6 +7,46 @@
 - For automatic Ollama model availability, use a one-shot `ollama-init` service that shares `./data/ollama`, waits for the API, and gates model-dependent services with `condition: service_completed_successfully`.
 - When Ollama model compatibility outruns usable Docker tags, pin the official `ollama/ollama` image by digest in Compose so `ollama` and `ollama-init` stay reproducible while still matching the required model set.
 - Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
+- For database-foundation stories, verify `alembic upgrade head` against a freshly created scratch PostgreSQL database through `docker compose run --rm --no-deps backend ...` instead of trusting file-only migration scaffolding.
+
+## [2026-03-14 18:09:45 +0300] - EP-002 / US-008
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Initialize SQLAlchemy models and Alembic migration workflow
+Thread: CLI run
+- What was implemented
+  - Added SQLAlchemy 2.x foundation code in `backend/app/infra/db.py` with a shared declarative base, naming convention, engine factory, and sessionmaker bound to `DATABASE_URL`.
+  - Wired Alembic under `backend/alembic` with `alembic.ini`, a standard `env.py`, a script template, and an initial baseline revision so schema changes can be managed through migrations from here forward.
+  - Added lightweight repository tests that guard the migration scaffold and the presence of the shared SQLAlchemy base without forcing local pytest to import optional backend dependencies.
+- Files changed
+  - `backend/requirements.txt`
+  - `backend/alembic.ini`
+  - `backend/alembic/env.py`
+  - `backend/alembic/script.py.mako`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/app/infra/db.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (11 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_alembic_check backend alembic upgrade head` ✅
+  - `docker compose exec -T postgres psql -U sematrix -d sematrix_alembic_check -c "SELECT version_num FROM alembic_version;"` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-008` as passed and added a durable note about the shared SQLAlchemy base plus the baseline Alembic workflow.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the actual schema tables, pgvector, generated search column, and indices stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - A scratch database created inside the Compose Postgres service is a reliable acceptance check for migration stories before the full backend API exists.
+  - Gotchas encountered
+    - Keeping the new migration guard tests file-based avoids forcing host-side `pytest` to import SQLAlchemy before the backend image or virtualenv is prepared.
+  - Useful context
+    - The current Alembic head is `20260314_1800`, and later schema stories can extend it with real tables without replacing the migration bootstrap files.
+---
 
 ## [2026-03-14 17:50:46 +0300] - EP-001 / epic-finalization
 Epic: Local infrastructure and Docker Compose bootstrap
