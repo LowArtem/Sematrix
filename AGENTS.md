@@ -74,6 +74,7 @@ Backend foundation convention:
 - For `youtube_channel` links, keep the YouTube Data API as the primary path and only fall back to SSRF-safe web fetching on retryable API failures, storing the fallback as a warning-backed exception path instead of redefining the main design.
 - Keep text-file link processing in `backend/app/infra/pipeline.py` on top of the shared SSRF-safe fetcher: enforce `MAX_TEXT_FILE_MB`, persist full extracted text on `link_processing_results`, and treat summary-generation failures as warning-backed fallbacks instead of discarding usable fetched text.
 - Keep generic webpage link processing on top of the shared SSRF-safe fetcher, extract main text through `backend/app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and downgrade summary-generation failures to warning-backed heuristic summaries so usable page text still reaches indexing.
+- Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage persists its durable per-run result, so polled note detail can surface warnings before finalization while Ready-state finalization still deduplicates against the stage tables.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.

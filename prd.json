@@ -761,13 +761,13 @@
             "Single-link and single-image failures can still lead to final status Ready when the base index succeeds"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The recommended warning payload shape is explicitly fixed in the architecture section."
+          "passes": true,
+          "notes": "The recommended warning payload shape is explicitly fixed in the architecture section. Per-object OCR, image-caption, and link-stage warnings now persist immediately onto `notes.processing_warnings` as well as the per-run result rows, so polled note detail can surface structured `stage`/`target`/`code`/`message`/`retryable` warnings before finalization while Ready-state finalization still deduplicates against durable stage results."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, text-file link processing, and generic webpage processing are now in place, but the warning-surface story is still open."
+      "passes": true,
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, text-file link processing, generic webpage processing, and immediate note-level mirroring of per-object non-critical warnings are now all in place, so the epic acceptance criteria are satisfied."
     },
     {
       "id": "EP-007",

@@ -326,6 +326,15 @@ class PipelineRuntimeRepository(Protocol):
         warning: dict[str, object],
     ) -> bool: ...
 
+    def store_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> bool: ...
+
     def store_asset_ocr_result(
         self,
         *,
@@ -695,6 +704,24 @@ class SqlAlchemyPipelineRuntimeRepository:
         pipeline_run_id: UUID,
         warning: dict[str, object],
     ) -> bool:
+        return self.store_processing_warnings(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            warnings=[warning],
+        )
+
+    def store_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> bool:
+        if not warnings:
+            return True
+
         note = self._session.get(Note, note_id)
         pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
         if note is None or pipeline_run is None:
@@ -706,7 +733,7 @@ class SqlAlchemyPipelineRuntimeRepository:
 
         merged_warnings = merge_processing_warnings(
             self._normalize_processing_warnings(note.processing_warnings),
-            [warning],
+            warnings,
         )
         note.processing_warnings = merged_warnings
         note.has_warnings = bool(merged_warnings)
@@ -1192,6 +1219,12 @@ class PipelineStageRunner:
                 fetch_status=fetch_status,
                 warnings=warnings,
             )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                warnings=warnings,
+            )
 
         logger.info(
             "pipeline_stage_completed",
@@ -1497,7 +1530,7 @@ class PipelineStageRunner:
                         retryable=False,
                     )
                 ]
-                warning_count += 1
+                warning_count += len(warnings)
 
             self._runtime_repository.store_asset_ocr_result(
                 note_id=note_id,
@@ -1506,6 +1539,12 @@ class PipelineStageRunner:
                 asset_id=asset.asset_id,
                 ocr_text=ocr_text,
                 ocr_status=ocr_status,
+                warnings=warnings,
+            )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
                 warnings=warnings,
             )
 
@@ -1608,7 +1647,7 @@ class PipelineStageRunner:
                         retryable=False,
                     )
                 ]
-                warning_count += 1
+                warning_count += len(warnings)
 
             self._runtime_repository.store_asset_caption_result(
                 note_id=note_id,
@@ -1617,6 +1656,12 @@ class PipelineStageRunner:
                 asset_id=asset.asset_id,
                 caption_text=caption_text,
                 caption_status=caption_status,
+                warnings=warnings,
+            )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
                 warnings=warnings,
             )
 
@@ -1721,6 +1766,24 @@ class PipelineStageRunner:
             "skipped_count": skipped_count,
             "skipped": False,
         }
+
+    def _store_note_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        if not warnings:
+            return
+
+        self._runtime_repository.store_processing_warnings(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            warnings=warnings,
+        )
 
     def _get_active_stage_runtime_state(
         self,

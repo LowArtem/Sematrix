@@ -43,6 +43,39 @@
 - For `youtube_channel` links, keep the YouTube Data API as the default path and use the shared SSRF-safe fetcher only for retryable API-failure fallback, recording that downgrade as a warning instead of changing the primary integration design.
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
+- Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+
+## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Persist per-object warnings for non-critical link and image failures
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/pipeline.py` so the runtime repository can merge multiple note-level warnings in one write and the OCR, image-caption, and link stages now mirror each per-object warning onto `notes.processing_warnings` immediately after persisting the durable per-run result row.
+  - Added `backend/tests/test_pipeline_warning_persistence.py` source guards that lock in the note-warning merge helper and the stage-runner mirroring behavior, while leaving finalization to deduplicate note-level warnings against the durable stage tables.
+  - Updated `AGENTS.md` with the reusable rule that per-object non-critical warnings should be surfaced on the note record during Processing, not only at finalization time.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_warning_persistence.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_warning_persistence.py backend/tests/test_pipeline_failure_handling.py backend/tests/test_pipeline_ocr_stage.py backend/tests/test_pipeline_image_caption_stage.py backend/tests/test_pipeline_web_page_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (120 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-048` as passed and added a durable note about immediate note-level warning mirroring plus finalization-time deduplication.
+  - Re-evaluated `EP-006`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Mirror per-object non-critical stage warnings onto the note row as soon as the stage persists its durable result, so REST polling can surface warnings before finalization without changing the final deduplication model.
+  - Gotchas encountered
+    - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
+  - Useful context
+    - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046
 Epic: Image OCR/caption and secure link processing
