@@ -561,8 +561,8 @@
             "note_processing_finished includes total_duration_ms and stage_durations_ms where available"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The final summary must be based on search_text but search_text must not be rebuilt again from summary, preventing a cyclic dependency."
+          "passes": true,
+          "notes": "The final summary must be based on search_text but search_text must not be rebuilt again from summary, preventing a cyclic dependency. `sematrix.finalize_pipeline` now reloads the current note plus durable asset/link processing rows from PostgreSQL, rebuilds `search_text` through a shared helper, recalculates and validates a 1024-dimension embedding through the local Ollama adapter, generates the final summary in non-thinking mode, marks both the note and `pipeline_runs` row Ready, and logs `note_processing_finished` with total and per-stage durations."
         },
         {
           "id": "US-036",

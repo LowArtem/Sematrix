@@ -4,7 +4,7 @@ from uuid import UUID
 from app.domain.system import WorkerHeartbeatService
 from app.core import get_logger
 from app.infra import SessionLocal
-from app.infra.pipeline import build_pipeline_orchestrator, build_pipeline_stage_runner
+from app.infra.pipeline import build_pipeline_finalizer, build_pipeline_orchestrator, build_pipeline_stage_runner
 from app.workers.celery_app import celery_app
 
 
@@ -184,13 +184,18 @@ def finalize_pipeline(
             "pipeline_run_id": pipeline_run_id,
         },
     )
-    return {
-        "status": "accepted",
-        "note_id": note_id,
-        "index_version": index_version,
-        "pipeline_run_id": pipeline_run_id,
-        "stage_results": stage_results,
-    }
+    session = SessionLocal()
+    try:
+        finalizer = build_pipeline_finalizer(session=session)
+        return finalizer.finalize_pipeline(
+            note_id=UUID(note_id),
+            index_version=index_version,
+            pipeline_run_id=UUID(pipeline_run_id),
+            request_id=request_id,
+            stage_results=stage_results,
+        )
+    finally:
+        session.close()
 
 
 @celery_app.task(bind=True, name="sematrix.pipeline_failed")

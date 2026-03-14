@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Callable, Protocol
 from uuid import UUID
 
 from celery import chord, group
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core import Settings, get_logger, get_settings
-from app.domain.pipeline import build_pipeline_stages, compute_snapshot_hash
-from app.infra.models import Note, NoteAsset, NoteLink, PipelineRun
+from app.domain.pipeline import build_pipeline_stages, build_search_text, compute_snapshot_hash
+from app.infra.models import AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
+from app.infra.ollama import OllamaClient
 from app.workers.celery_app import celery_app
 
 
@@ -40,6 +43,34 @@ class PipelineStageRuntimeState:
     snapshot_hash: str
 
 
+@dataclass(frozen=True)
+class PipelineFinalizationRuntimeState:
+    note_id: UUID
+    index_version: int
+    current_index_version: int
+    pipeline_run_id: UUID
+    pipeline_run_note_id: UUID
+    pipeline_run_index_version: int
+    started_at: datetime
+    title: str
+    content_text_flat: str
+    tag_names: list[str]
+
+
+@dataclass(frozen=True)
+class AssetProcessingTextResult:
+    ocr_text: str
+    caption_text: str
+
+
+@dataclass(frozen=True)
+class LinkProcessingTextResult:
+    url: str
+    page_title: str
+    extracted_text: str
+    generated_summary: str
+
+
 class PipelineRuntimeRepository(Protocol):
     def get_runtime_state(self, *, note_id: UUID, index_version: int) -> PipelineRuntimeState | None: ...
 
@@ -54,6 +85,43 @@ class PipelineRuntimeRepository(Protocol):
     def list_snapshot_asset_ids(self, *, note_id: UUID, snapshot_asset_ids: list[UUID]) -> list[UUID]: ...
 
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]: ...
+
+    def get_finalization_runtime_state(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> PipelineFinalizationRuntimeState | None: ...
+
+    def list_asset_processing_texts(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[AssetProcessingTextResult]: ...
+
+    def list_link_processing_texts(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[LinkProcessingTextResult]: ...
+
+    def finalize_pipeline_run(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        search_text: str,
+        embedding: list[float],
+        summary: str,
+        total_duration_ms: int,
+        stage_durations_ms: dict[str, int],
+    ) -> None: ...
 
 
 class SqlAlchemyPipelineRuntimeRepository:
@@ -137,6 +205,130 @@ class SqlAlchemyPipelineRuntimeRepository:
             )
         )
         return [link_id for link_id in snapshot_link_ids if link_id in existing_link_ids]
+
+    def get_finalization_runtime_state(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> PipelineFinalizationRuntimeState | None:
+        note = self._session.scalar(
+            select(Note)
+            .where(Note.id == note_id)
+            .options(selectinload(Note.tags))
+        )
+        if note is None:
+            return None
+
+        pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
+        if pipeline_run is None:
+            return None
+
+        return PipelineFinalizationRuntimeState(
+            note_id=note_id,
+            index_version=index_version,
+            current_index_version=note.index_version,
+            pipeline_run_id=pipeline_run.id,
+            pipeline_run_note_id=pipeline_run.note_id,
+            pipeline_run_index_version=pipeline_run.index_version,
+            started_at=pipeline_run.started_at,
+            title=note.title,
+            content_text_flat=note.content_text_flat,
+            tag_names=[tag.name for tag in note.tags],
+        )
+
+    def list_asset_processing_texts(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[AssetProcessingTextResult]:
+        results = list(
+            self._session.scalars(
+                select(AssetProcessingResult)
+                .where(
+                    AssetProcessingResult.note_id == note_id,
+                    AssetProcessingResult.index_version == index_version,
+                    AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                )
+                .order_by(AssetProcessingResult.asset_id)
+            )
+        )
+        return [
+            AssetProcessingTextResult(
+                ocr_text=result.ocr_text,
+                caption_text=result.caption_text,
+            )
+            for result in results
+        ]
+
+    def list_link_processing_texts(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+    ) -> list[LinkProcessingTextResult]:
+        rows = self._session.execute(
+            select(LinkProcessingResult, NoteLink.url)
+            .join(NoteLink, NoteLink.id == LinkProcessingResult.link_id)
+            .where(
+                LinkProcessingResult.note_id == note_id,
+                LinkProcessingResult.index_version == index_version,
+                LinkProcessingResult.pipeline_run_id == pipeline_run_id,
+            )
+            .order_by(LinkProcessingResult.link_id)
+        ).all()
+        return [
+            LinkProcessingTextResult(
+                url=url,
+                page_title=result.page_title,
+                extracted_text=result.extracted_text,
+                generated_summary=result.generated_summary,
+            )
+            for result, url in rows
+        ]
+
+    def finalize_pipeline_run(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        search_text: str,
+        embedding: list[float],
+        summary: str,
+        total_duration_ms: int,
+        stage_durations_ms: dict[str, int],
+    ) -> None:
+        note = self._session.get(Note, note_id)
+        pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
+        if note is None or pipeline_run is None:
+            raise RuntimeError("Pipeline finalization state disappeared before commit")
+        if note.index_version != index_version:
+            raise RuntimeError("Pipeline finalization attempted to write a stale note version")
+        if pipeline_run.note_id != note_id or pipeline_run.index_version != index_version:
+            raise RuntimeError("Pipeline finalization attempted to write a mismatched pipeline run")
+
+        finished_at = datetime.now(timezone.utc)
+
+        note.search_text = search_text
+        note.embedding = embedding
+        note.summary = summary
+        note.status = "Ready"
+        note.processing_error = None
+
+        pipeline_run.status = "Ready"
+        pipeline_run.finished_at = finished_at
+        pipeline_run.total_duration_ms = total_duration_ms
+        pipeline_run.stage_durations_ms = stage_durations_ms
+        pipeline_run.processing_error = None
+
+        self._session.add(note)
+        self._session.add(pipeline_run)
+        self._session.commit()
 
 
 class CeleryPipelineDispatcher:
@@ -539,6 +731,202 @@ class PipelineStageRunner:
         )
 
 
+class PipelineFinalizer:
+    def __init__(
+        self,
+        *,
+        runtime_repository: PipelineRuntimeRepository,
+        ollama_client: OllamaClient,
+    ) -> None:
+        self._runtime_repository = runtime_repository
+        self._ollama_client = ollama_client
+
+    def finalize_pipeline(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        stage_results: list[dict[str, object]],
+    ) -> dict[str, object]:
+        runtime_state = self._runtime_repository.get_finalization_runtime_state(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+        if runtime_state is None:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        if runtime_state.current_index_version != index_version:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="stale_version",
+            )
+
+        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
+            return self._build_skipped_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="pipeline_run_mismatch",
+            )
+
+        asset_text_results = self._runtime_repository.list_asset_processing_texts(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+        link_text_results = self._runtime_repository.list_link_processing_texts(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+
+        search_document_started_at = perf_counter()
+        search_text = build_search_text(
+            title=runtime_state.title,
+            content_text_flat=runtime_state.content_text_flat,
+            tag_names=runtime_state.tag_names,
+            asset_texts=[
+                text
+                for result in asset_text_results
+                for text in (result.ocr_text, result.caption_text)
+            ],
+            link_texts=[
+                text
+                for result in link_text_results
+                for text in (result.url, result.page_title, result.extracted_text, result.generated_summary)
+            ],
+        )
+        search_document_duration_ms = int((perf_counter() - search_document_started_at) * 1000)
+
+        embeddings_started_at = perf_counter()
+        embedding = self._ollama_client.embed_text(text=search_text)
+        embeddings_duration_ms = int((perf_counter() - embeddings_started_at) * 1000)
+        if len(embedding) != 1024:
+            raise ValueError("Embedding dimensionality must be exactly 1024")
+
+        summary_started_at = perf_counter()
+        summary = self._ollama_client.generate_summary(search_text=search_text) if search_text else ""
+        summary_duration_ms = int((perf_counter() - summary_started_at) * 1000)
+
+        stage_durations_ms = self._build_stage_durations(
+            stage_results=stage_results,
+            search_document_duration_ms=search_document_duration_ms,
+            embeddings_duration_ms=embeddings_duration_ms,
+            summary_duration_ms=summary_duration_ms,
+        )
+        total_duration_ms = max(
+            int((datetime.now(timezone.utc) - runtime_state.started_at).total_seconds() * 1000),
+            0,
+        )
+
+        self._runtime_repository.finalize_pipeline_run(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            search_text=search_text,
+            embedding=embedding,
+            summary=summary,
+            total_duration_ms=total_duration_ms,
+            stage_durations_ms=stage_durations_ms,
+        )
+
+        logger.info(
+            "note_processing_finished",
+            extra={
+                "event": "note_processing_finished",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "status": "Ready",
+                "total_duration_ms": total_duration_ms,
+                "stage_durations_ms": stage_durations_ms,
+            },
+        )
+
+        return {
+            "status": "ready",
+            "note_id": str(note_id),
+            "index_version": index_version,
+            "pipeline_run_id": str(pipeline_run_id),
+            "search_text": search_text,
+            "summary": summary,
+            "total_duration_ms": total_duration_ms,
+            "stage_durations_ms": stage_durations_ms,
+        }
+
+    def _build_skipped_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        skipped_reason: str,
+    ) -> dict[str, object]:
+        logger.info(
+            "pipeline_finalization_skipped",
+            extra={
+                "event": "pipeline_finalization_skipped",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "status": "skipped",
+                "processing_error": skipped_reason,
+            },
+        )
+        return {
+            "status": "skipped",
+            "note_id": str(note_id),
+            "index_version": index_version,
+            "pipeline_run_id": str(pipeline_run_id),
+            "skipped_reason": skipped_reason,
+        }
+
+    @staticmethod
+    def _build_stage_durations(
+        *,
+        stage_results: list[dict[str, object]],
+        search_document_duration_ms: int,
+        embeddings_duration_ms: int,
+        summary_duration_ms: int,
+    ) -> dict[str, int]:
+        stage_durations_ms: dict[str, int] = {
+            "search_document_build": search_document_duration_ms,
+            "embeddings": embeddings_duration_ms,
+            "summary_final": summary_duration_ms,
+        }
+
+        stage_name_map = {
+            "process_links": "link_fetch",
+            "process_ocr": "ocr",
+            "process_image_caption": "image_caption",
+        }
+        for stage_result in stage_results:
+            raw_stage_name = stage_result.get("stage_name")
+            raw_duration = stage_result.get("duration_ms")
+            if not isinstance(raw_stage_name, str) or not isinstance(raw_duration, int):
+                continue
+            normalized_stage_name = stage_name_map.get(raw_stage_name, raw_stage_name)
+            stage_durations_ms[normalized_stage_name] = raw_duration
+
+        return stage_durations_ms
+
+
 def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrator:
     return CeleryPipelineOrchestrator(
         runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
@@ -549,3 +937,15 @@ def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrat
 
 def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
     return PipelineStageRunner(runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session))
+
+
+def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:
+    settings = get_settings()
+    return PipelineFinalizer(
+        runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
+        ollama_client=OllamaClient(
+            base_url=settings.ollama_url,
+            llm_model=settings.llm_model,
+            embed_model=settings.embed_model,
+        ),
+    )

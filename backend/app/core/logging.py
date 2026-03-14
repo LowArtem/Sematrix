@@ -41,6 +41,8 @@ class StructuredJsonFormatter(logging.Formatter):
             "task_id",
             "note_id",
             "index_version",
+            "status",
+            "processing_error",
             "task_name",
             "task_state",
             "pipeline_run_id",
@@ -49,6 +51,8 @@ class StructuredJsonFormatter(logging.Formatter):
             "status_code",
             "started_at",
             "duration_ms",
+            "total_duration_ms",
+            "stage_durations_ms",
         ):
             value = getattr(record, field_name, None)
             if value is not None:

@@ -67,6 +67,7 @@ Backend foundation convention:
 - Keep structured logging context centralized in `backend/app/core/logging.py`, with API `X-Request-Id` binding registered from `backend/app/api/middleware.py` and Celery `task_id` binding registered from worker bootstrap instead of ad hoc per-handler logger setup.
 - Keep request-scoped SQLAlchemy sessions in `backend/app/api/dependencies.py` and build repository-backed domain services from those dependencies instead of opening database sessions inside route handlers.
 - Keep file-backed asset persistence in `backend/app/infra/assets.py`, and remove any just-written file on database rollback so `assets` / `note_assets` rows cannot drift from the filesystem.
+- Keep local Ollama HTTP calls inside `backend/app/infra` adapters and inject those clients into pipeline services so tests can swap in fakes without moving summary/embedding logic into worker tasks.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.
@@ -113,6 +114,7 @@ Do not move business logic into route handlers or UI code.
 - The only pipeline entrypoint is `start_pipeline(note_id, index_version, request_id)`.
 - Individual OCR/link/caption stages must not be launched ad hoc from API routes.
 - Only `finalize_pipeline(...)` or `pipeline_failed(...)` may set the final note state to `Ready` or `Error`.
+- `finalize_pipeline(...)` must read durable current-run stage outputs from PostgreSQL and rebuild `search_text`, `embedding`, and final `summary` from that stored state, not from large Celery callback payloads.
 
 ### Worker granularity
 

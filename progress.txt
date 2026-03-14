@@ -30,6 +30,45 @@
 - Create `pipeline_runs` inside the same note save/reindex repository transaction after flushing synchronized `note_assets` and `note_links`, so snapshots capture DB-assigned link IDs before dispatching background work.
 - Keep pipeline stage selection in `app/domain/pipeline.py`, and let the worker-side orchestrator load `pipeline_runs` snapshot state from the repository before it schedules any Celery `group/chord` work.
 - Keep stage guards in `app/infra/pipeline.py`, and have worker stages reload `pipeline_run_id` snapshot state there so they validate `index_version`/`snapshot_hash` and query live assets or links only through snapshot-filtered IDs.
+- Keep final note finalization in `app/infra/pipeline.py` with an injected `app/infra/ollama.py` client so `finalize_pipeline` rebuilds `search_text`, embeddings, and final summary from durable PostgreSQL results while smoke tests can swap in fake local-model clients.
+
+## [2026-03-14 21:21:26 +0300] - EP-005 / US-035
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement finalize_pipeline as the only Ready transition and final index writer
+Thread: CLI run
+- What was implemented
+  - Added a shared finalization flow in `backend/app/infra/pipeline.py` so `sematrix.finalize_pipeline` now reloads the current note and durable `asset_processing_results` / `link_processing_results` rows for one `pipeline_run_id`, validates the current note version, rebuilds `search_text`, recalculates the final embedding, generates the final summary, and marks both the note and `pipeline_runs` row `Ready`.
+  - Added `backend/app/domain/pipeline.py` search-document assembly helpers plus `backend/app/infra/ollama.py` for local Ollama `/api/embed` and non-thinking `/api/generate` calls, keeping model traffic in infra and validating the saved embedding length to exactly 1024 values before commit.
+  - Updated `backend/app/workers/tasks.py` and `backend/app/core/logging.py` so the worker task delegates through a shared finalizer and `note_processing_finished` logs now keep `status`, `total_duration_ms`, and `stage_durations_ms` in the structured JSON output.
+  - Added `backend/tests/test_pipeline_finalization.py` source guards and a scratch-Postgres backend-container smoke test that runs the finalizer with a fake Ollama client and verifies the note plus pipeline-run Ready transition.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/core/logging.py`
+  - `backend/app/domain/pipeline.py`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_pipeline_finalization.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (67 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineFinalizer smoke test with fake Ollama client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-035` as passed and added a durable note about DB-backed finalization, Ollama-backed embedding/summary generation, Ready-state writes, and final timing logs.
+  - Re-evaluated `EP-005`; it remains `passes: false` because failure classification, retries, Draft cleanup, and the remaining lifecycle stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep final note finalization in a shared infra service with an injected Ollama client so the worker task stays thin while integration smoke tests can stub the local model layer.
+  - Gotchas encountered
+    - Adding new structured log fields is not enough by itself; `StructuredJsonFormatter` must whitelist them or `note_processing_finished` loses required timing/status data in the emitted JSON.
+  - Useful context
+    - The current finalizer already reads durable stage rows from PostgreSQL, so later OCR/link/caption stories only need to write their per-run results and warnings for finalization to consume them.
+---
 
 ## [2026-03-14 21:10:58 +0300] - EP-005 / US-034
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
