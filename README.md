@@ -21,3 +21,4 @@ This repository starts with the MVP directory layout required by the project spe
 - `docker compose up --build` starts the current local stack baseline.
 - The compose services are `postgres`, `redis`, `ollama`, `backend`, `worker`, `beat`, and `frontend`.
 - The backend exposes a temporary health endpoint at `http://localhost:8000/api/health`.
+- Docker publishes only the UI and API, and both are bound to `127.0.0.1` by default.

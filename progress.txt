@@ -1,6 +1,38 @@
 ## Codebase Patterns
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
+- For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered `docker compose config` output in tests.
+
+## [2026-03-14 16:24:39 +0300] - EP-001 / US-003
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Bind published ports to localhost only
+Thread: CLI run
+- What was implemented
+  - Switched the published `backend` and `frontend` ports in `docker-compose.yml` to long-form mappings with `host_ip: 127.0.0.1` so only the UI and API are exposed on localhost.
+  - Added a compose test that checks the rendered config for the expected localhost-only host bindings.
+  - Documented the localhost-only publishing rule in the runtime README notes.
+- Files changed
+  - `docker-compose.yml`
+  - `backend/tests/test_docker_compose.py`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (4 passed)
+  - `docker compose config --services` ✅
+  - `docker compose up --build -d` + `docker compose port backend 8000` + `docker compose port frontend 80` + HTTP smoke checks for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:8080` ✅
+- PRD updates made
+  - Marked `US-003` as passed and added a durable note about the long-form Compose host binding plus config test coverage.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the fixed host data mounts, Ollama tuning, model init, and SPA proxying stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered config instead of relying on short-form port strings.
+  - Gotchas encountered
+    - `docker compose port` helps confirm the runtime binding after startup, while `docker compose config` is the static guard that belongs in tests.
+  - Useful context
+    - Only `backend` and `frontend` publish host ports in the current stack; the remaining services stay internal to the Docker network.
+---
 
 ## [2026-03-14 16:02:46 +0300] - EP-001 / US-001
 Epic: Local infrastructure and Docker Compose bootstrap

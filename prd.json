@@ -51,8 +51,8 @@
             "Ollama, Postgres, and Redis are not required to be public and may remain internal by default"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Localhost-only access is a hard restriction from the spec. Do not add password protection or remote exposure as a substitute."
+          "passes": true,
+          "notes": "Localhost-only access is a hard restriction from the spec. Do not add password protection or remote exposure as a substitute. Updated the published backend/frontend ports to long-form Compose mappings with `host_ip: 127.0.0.1`, and added test coverage that checks the rendered Compose config for localhost-only bindings."
         },
         {
           "id": "US-004",
