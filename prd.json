@@ -516,8 +516,8 @@
             "note_processing_started is logged with note_id, index_version, request_id, and a measurable start time"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Snapshot creation is mandatory to prevent outdated background tasks from touching changed notes."
+          "passes": true,
+          "notes": "Snapshot creation is mandatory to prevent outdated background tasks from touching changed notes. Added a shared `compute_snapshot_hash(...)` helper plus note-repository pipeline-run creation that flushes synchronized `note_assets`/`note_links`, inserts exactly one `pipeline_runs` row inside the same save/reindex transaction, and emits `note_processing_started` with `pipeline_run_id` and `started_at` before dispatching `sematrix.start_pipeline`."
         },
         {
           "id": "US-033",
@@ -625,7 +625,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings."
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, but orchestration, stage guards, finalization, failure handling, cleanup, and related lifecycle work still remain before the epic can pass."
     },
     {
       "id": "EP-006",

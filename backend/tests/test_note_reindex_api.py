@@ -19,7 +19,8 @@ def test_note_reindex_service_dispatches_pipeline_with_request_context() -> None
     domain_source = (BACKEND_APP / "domain" / "notes.py").read_text(encoding="utf-8")
 
     assert 'def reindex_note(self, note_id: UUID, *, request_id: str | None) -> NoteResult:' in domain_source
-    assert 'note = self._note_repository.reindex_note(note_id)' in domain_source
+    assert 'reindex_result = self._note_repository.reindex_note(note_id, request_id=request_id)' in domain_source
+    assert '"event": "note_processing_started"' in domain_source
     assert 'self._pipeline_dispatcher.start_pipeline(' in domain_source
     assert 'request_id=request_id,' in domain_source
 
@@ -27,10 +28,11 @@ def test_note_reindex_service_dispatches_pipeline_with_request_context() -> None
 def test_note_reindex_repository_increments_version_and_resets_runtime_state() -> None:
     infra_source = (BACKEND_APP / "infra" / "notes.py").read_text(encoding="utf-8")
 
-    assert 'def reindex_note(self, note_id: UUID) -> NoteRecord:' in infra_source
+    assert 'def reindex_note(self, note_id: UUID, *, request_id: str | None) -> ReindexNoteRecord:' in infra_source
     assert 'note.index_version += 1' in infra_source
     assert 'note.status = "Processing"' in infra_source
     assert 'note.processing_error = None' in infra_source
     assert 'note.has_warnings = False' in infra_source
     assert 'note.warnings_count = 0' in infra_source
     assert 'note.processing_warnings = []' in infra_source
+    assert 'pipeline_run = self._create_pipeline_run(' in infra_source

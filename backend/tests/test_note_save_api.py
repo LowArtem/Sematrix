@@ -26,6 +26,9 @@ def test_note_save_service_parses_content_and_dispatches_pipeline() -> None:
     assert 'parsed_content = parse_note_content(content_json)' in domain_source
     assert 'should_start_processing = has_meaningful_content(' in domain_source
     assert 'should_start_processing=should_start_processing' in domain_source
+    assert '"event": "note_processing_started"' in domain_source
+    assert 'pipeline_run = save_result.pipeline_run' in domain_source
+    assert '"started_at": pipeline_run.started_at.isoformat()' in domain_source
     assert 'self._pipeline_dispatcher.start_pipeline(' in domain_source
     assert 'class DraftResetState:' in lifecycle_source
     assert 'def build_draft_reset_state() -> DraftResetState:' in lifecycle_source
@@ -46,9 +49,14 @@ def test_note_save_repository_syncs_links_assets_and_processing_state() -> None:
     assert 'note.assets = assets' in infra_source
     assert 'self._sync_note_links(note=note, links=links)' in infra_source
     assert 'should_start_processing: bool' in infra_source
+    assert 'request_id: str | None,' in infra_source
+    assert 'self._session.flush()' in infra_source
     assert 'if should_start_processing:' in infra_source
     assert 'note.index_version += 1' in infra_source
     assert 'note.status = "Processing"' in infra_source
+    assert 'pipeline_run = self._create_pipeline_run(' in infra_source
+    assert 'snapshot_link_ids = sorted(' in infra_source
+    assert 'snapshot_hash=compute_snapshot_hash(' in infra_source
     assert 'draft_reset_state = build_draft_reset_state()' in infra_source
     assert 'note.status = "Draft"' in infra_source
     assert 'note.summary = draft_reset_state.summary' in infra_source

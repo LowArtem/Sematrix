@@ -33,6 +33,8 @@ def test_fastapi_and_celery_wire_structured_logging() -> None:
     assert 'contextvars.ContextVar("task_id"' in logging_source
     assert '"request_id"' in logging_source
     assert '"task_id"' in logging_source
+    assert '"pipeline_run_id"' in logging_source
+    assert '"started_at"' in logging_source
     assert 'worker_hijack_root_logger=False' in celery_source
     assert '@task_prerun.connect' in celery_source
     assert '@task_postrun.connect' in celery_source

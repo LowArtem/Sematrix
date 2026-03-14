@@ -43,9 +43,11 @@ class StructuredJsonFormatter(logging.Formatter):
             "index_version",
             "task_name",
             "task_state",
+            "pipeline_run_id",
             "method",
             "path",
             "status_code",
+            "started_at",
             "duration_ms",
         ):
             value = getattr(record, field_name, None)

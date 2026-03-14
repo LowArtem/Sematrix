@@ -12,8 +12,9 @@ from sqlalchemy.orm import selectinload
 from app.domain.errors import NotFoundError
 from app.domain.note_lifecycle import build_draft_reset_state
 from app.domain.note_content import ExtractedLink
+from app.domain.pipeline import compute_snapshot_hash
 from app.infra.assets import get_asset_path
-from app.infra.models import Asset, Folder, Note, NoteAsset, NoteLink, NoteTag, Tag
+from app.infra.models import Asset, Folder, Note, NoteAsset, NoteLink, NoteTag, PipelineRun, Tag
 
 
 EMPTY_DOCUMENT = {"type": "doc", "content": []}
@@ -50,6 +51,21 @@ class NoteListRecord:
 class SaveNoteRecord:
     note: NoteRecord
     pipeline_started: bool
+    pipeline_run: PipelineRunRecord | None
+
+
+@dataclass(frozen=True)
+class PipelineRunRecord:
+    id: UUID
+    note_id: UUID
+    index_version: int
+    started_at: datetime
+
+
+@dataclass(frozen=True)
+class ReindexNoteRecord:
+    note: NoteRecord
+    pipeline_run: PipelineRunRecord
 
 
 class NoteRepository(Protocol):
@@ -59,7 +75,7 @@ class NoteRepository(Protocol):
 
     def delete_note(self, note_id: UUID) -> None: ...
 
-    def reindex_note(self, note_id: UUID) -> NoteRecord: ...
+    def reindex_note(self, note_id: UUID, *, request_id: str | None) -> ReindexNoteRecord: ...
 
     def save_note(
         self,
@@ -73,6 +89,7 @@ class NoteRepository(Protocol):
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        request_id: str | None,
     ) -> SaveNoteRecord: ...
 
     def list_notes(
@@ -118,7 +135,7 @@ class SqlAlchemyNoteRepository:
         for storage_key in asset_storage_keys_to_delete:
             get_asset_path(storage_key).unlink(missing_ok=True)
 
-    def reindex_note(self, note_id: UUID) -> NoteRecord:
+    def reindex_note(self, note_id: UUID, *, request_id: str | None) -> ReindexNoteRecord:
         note = self._get_note_with_relations(note_id)
         if note is None:
             raise NotFoundError("Note not found")
@@ -131,13 +148,18 @@ class SqlAlchemyNoteRepository:
         note.processing_warnings = []
 
         self._session.add(note)
+        pipeline_run = self._create_pipeline_run(
+            note_id=note.id,
+            index_version=note.index_version,
+            request_id=request_id,
+        )
         self._session.commit()
 
         reindexed_note = self._get_note_with_relations(note_id)
         if reindexed_note is None:
             raise NotFoundError("Note not found")
 
-        return self._to_record(reindexed_note)
+        return ReindexNoteRecord(note=self._to_record(reindexed_note), pipeline_run=pipeline_run)
 
     def save_note(
         self,
@@ -151,6 +173,7 @@ class SqlAlchemyNoteRepository:
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        request_id: str | None,
     ) -> SaveNoteRecord:
         note = self._get_note_with_relations(note_id)
         if note is None:
@@ -170,6 +193,9 @@ class SqlAlchemyNoteRepository:
         note.assets = assets
         self._sync_note_links(note=note, links=links)
         note.updated_at = datetime.now(timezone.utc)
+        self._session.flush()
+
+        pipeline_run: PipelineRunRecord | None = None
 
         if should_start_processing:
             note.index_version += 1
@@ -178,6 +204,11 @@ class SqlAlchemyNoteRepository:
             note.has_warnings = False
             note.warnings_count = 0
             note.processing_warnings = []
+            pipeline_run = self._create_pipeline_run(
+                note_id=note.id,
+                index_version=note.index_version,
+                request_id=request_id,
+            )
         else:
             draft_reset_state = build_draft_reset_state()
             note.status = "Draft"
@@ -196,7 +227,11 @@ class SqlAlchemyNoteRepository:
         if saved_note is None:
             raise NotFoundError("Note not found")
 
-        return SaveNoteRecord(note=self._to_record(saved_note), pipeline_started=should_start_processing)
+        return SaveNoteRecord(
+            note=self._to_record(saved_note),
+            pipeline_started=should_start_processing,
+            pipeline_run=pipeline_run,
+        )
 
     def list_notes(
         self,
@@ -340,6 +375,41 @@ class SqlAlchemyNoteRepository:
             self._session.delete(asset)
 
         return unused_storage_keys
+
+    def _create_pipeline_run(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        request_id: str | None,
+    ) -> PipelineRunRecord:
+        snapshot_asset_ids = sorted(
+            self._session.scalars(select(NoteAsset.asset_id).where(NoteAsset.note_id == note_id)).all(),
+            key=str,
+        )
+        snapshot_link_ids = sorted(
+            self._session.scalars(select(NoteLink.id).where(NoteLink.note_id == note_id)).all(),
+            key=str,
+        )
+        pipeline_run = PipelineRun(
+            note_id=note_id,
+            index_version=index_version,
+            snapshot_asset_ids=snapshot_asset_ids,
+            snapshot_link_ids=snapshot_link_ids,
+            snapshot_hash=compute_snapshot_hash(
+                asset_ids=snapshot_asset_ids,
+                link_ids=snapshot_link_ids,
+            ),
+            request_id=request_id,
+        )
+        self._session.add(pipeline_run)
+        self._session.flush()
+        return PipelineRunRecord(
+            id=pipeline_run.id,
+            note_id=pipeline_run.note_id,
+            index_version=pipeline_run.index_version,
+            started_at=pipeline_run.started_at,
+        )
 
     @staticmethod
     def _to_record(note: Note) -> NoteRecord:

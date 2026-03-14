@@ -6,6 +6,7 @@ import re
 from typing import Any, Protocol
 from uuid import UUID
 
+from app.core import get_logger
 from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
 from app.domain.errors import NotFoundError
@@ -14,6 +15,7 @@ from app.infra.notes import NoteRecord, NoteRepository
 
 
 HASHTAG_PATTERN = re.compile(r"(?<!\w)#([0-9A-Za-z_\u0400-\u04FF]+)")
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,13 +96,24 @@ class NoteService:
         self._note_repository.delete_note(note_id)
 
     def reindex_note(self, note_id: UUID, *, request_id: str | None) -> NoteResult:
-        note = self._note_repository.reindex_note(note_id)
+        reindex_result = self._note_repository.reindex_note(note_id, request_id=request_id)
+        logger.info(
+            "note_processing_started",
+            extra={
+                "event": "note_processing_started",
+                "note_id": str(reindex_result.note.id),
+                "index_version": reindex_result.note.index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(reindex_result.pipeline_run.id),
+                "started_at": reindex_result.pipeline_run.started_at.isoformat(),
+            },
+        )
         self._pipeline_dispatcher.start_pipeline(
-            note_id=note.id,
-            index_version=note.index_version,
+            note_id=reindex_result.note.id,
+            index_version=reindex_result.note.index_version,
             request_id=request_id,
         )
-        return self._to_result(note)
+        return self._to_result(reindex_result.note)
 
     def list_notes(
         self,
@@ -150,9 +163,24 @@ class NoteService:
             asset_ids=parsed_content.asset_ids,
             links=parsed_content.links,
             should_start_processing=should_start_processing,
+            request_id=request_id,
         )
 
         if save_result.pipeline_started:
+            pipeline_run = save_result.pipeline_run
+            if pipeline_run is None:
+                raise RuntimeError("Pipeline run was not created for a processing save")
+            logger.info(
+                "note_processing_started",
+                extra={
+                    "event": "note_processing_started",
+                    "note_id": str(save_result.note.id),
+                    "index_version": save_result.note.index_version,
+                    "request_id": request_id,
+                    "pipeline_run_id": str(pipeline_run.id),
+                    "started_at": pipeline_run.started_at.isoformat(),
+                },
+            )
             self._pipeline_dispatcher.start_pipeline(
                 note_id=save_result.note.id,
                 index_version=save_result.note.index_version,

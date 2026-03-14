@@ -27,6 +27,46 @@
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
 - For file-backed asset uploads, validate MIME/size in the domain service and unlink the just-written file on database rollback so `./data/assets` stays consistent with `assets` and `note_assets`.
 - For `GET /api/tags`, keep tag counting in the repository via an outer join on `note_tags`, and when `q` is present use ordering that moves substring matches first without filtering the non-matching tags out of the paginated result set.
+- Create `pipeline_runs` inside the same note save/reindex repository transaction after flushing synchronized `note_assets` and `note_links`, so snapshots capture DB-assigned link IDs before dispatching background work.
+
+## [2026-03-14 20:52:27 +0300] - EP-005 / US-032
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Create pipeline_run snapshot records at the start of every Processing version
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/domain/pipeline.py` with a shared `compute_snapshot_hash(...)` helper so snapshot hashing stays deterministic across later stage/finalization work.
+  - Updated `backend/app/infra/notes.py` so save and reindex now create exactly one `pipeline_runs` row inside the same transaction that moves a note into `Processing`, deriving `snapshot_asset_ids` and `snapshot_link_ids` from the current `note_assets` and `note_links` relations after a flush.
+  - Updated `backend/app/domain/notes.py` and `backend/app/core/logging.py` so the API-layer service logs `note_processing_started` with `note_id`, `index_version`, `request_id`, `pipeline_run_id`, and `started_at` immediately before dispatching `sematrix.start_pipeline`.
+  - Added source guards in `backend/tests/test_pipeline_snapshot.py`, `backend/tests/test_note_save_api.py`, `backend/tests/test_note_reindex_api.py`, and `backend/tests/test_structured_logging.py`, plus a scratch-Postgres smoke test that saves a note with one asset and one link and verifies the persisted snapshot row.
+- Files changed
+  - `backend/app/core/logging.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/domain/pipeline.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_reindex_api.py`
+  - `backend/tests/test_note_save_api.py`
+  - `backend/tests/test_pipeline_snapshot.py`
+  - `backend/tests/test_structured_logging.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (58 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... NoteService save -> pipeline_runs snapshot smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-032` as passed and added a durable note about the shared snapshot-hash helper, transactional pipeline-run creation, and `note_processing_started` logging fields.
+  - Re-evaluated `EP-005`; it remains `passes: false` because orchestration, stage guards, finalization, failure handling, cleanup, and related lifecycle stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Create `pipeline_runs` in the same repository transaction that flips a note into `Processing`, after flushing synchronized links/assets, so snapshot rows can safely include newly assigned `note_links.id` values.
+  - Gotchas encountered
+    - Snapshot rows created after a separate post-save step can miss freshly inserted link IDs; keeping snapshot creation inside the save/reindex transaction avoids that race with ORM state.
+  - Useful context
+    - `note_processing_started` now logs `pipeline_run_id` and `started_at`, which gives later orchestration and finalization stories a stable correlation anchor for one `(note_id, index_version)` run.
+---
 
 ## [2026-03-14 20:31:16 +0300] - EP-005 / US-030
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
