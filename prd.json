@@ -64,8 +64,8 @@
             "Uploaded note files persist under ./data/assets"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly distinguishes persistent database data, model cache, and note assets. Ollama cache is not part of backups."
+          "passes": true,
+          "notes": "The spec explicitly distinguishes persistent database data, model cache, and note assets. Ollama cache is not part of backups. Compose now bind-mounts `./data/postgres`, `./data/ollama`, and `./data/assets`, with `PGDATA` pinned to a child directory for the Postgres host path and the assets path shared into backend, worker, and beat."
         },
         {
           "id": "US-005",

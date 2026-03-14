@@ -2,6 +2,39 @@
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
 - For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered `docker compose config` output in tests.
+- For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
+
+## [2026-03-14 16:34:29 +0300] - EP-001 / US-004
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Mount persistent volumes under ./data using the fixed storage layout
+Thread: CLI run
+- What was implemented
+  - Switched the Compose storage from named volumes to the fixed host bind mounts `./data/postgres`, `./data/ollama`, and `./data/assets` required by the spec.
+  - Mounted `./data/assets` into `backend`, `worker`, and `beat` so uploaded note files will persist in one shared on-disk location for later API and worker stories.
+  - Added compose test coverage for the rendered host data mount paths and documented the fixed runtime storage layout in the README.
+- Files changed
+  - `docker-compose.yml`
+  - `backend/tests/test_docker_compose.py`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (5 passed)
+  - `docker compose config` ✅
+  - `docker compose config --services` ✅
+  - `docker compose up --build -d` + `docker compose port backend 8000` + `docker compose port frontend 80` + HTTP smoke checks for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:8080` + container mount inspection ✅
+- PRD updates made
+  - Marked `US-004` as passed and added a durable note about the fixed bind mounts, the Postgres `PGDATA` child directory, and the shared assets mount.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the Ollama GPU/stability settings, automatic model init, and SPA runtime proxy stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Fixed runtime storage stories are easier to guard by asserting rendered Compose bind mounts instead of relying only on the source YAML shape.
+  - Gotchas encountered
+    - Postgres bind mounts work more reliably in this stack when `PGDATA` points to a child directory inside `./data/postgres`, avoiding initdb collisions with the bind mount root.
+  - Useful context
+    - The shared note-assets path is already available inside backend and Celery containers at `/data/assets` for upcoming upload and cleanup work.
+---
 
 ## [2026-03-14 16:24:39 +0300] - EP-001 / US-003
 Epic: Local infrastructure and Docker Compose bootstrap
