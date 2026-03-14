@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from uuid import UUID
 
 from app.api.dependencies import get_note_service
-from app.api.dto import NoteDetailDto, TagRefDto
-from app.domain.notes import NoteResult, NoteService
+from app.api.dto import NoteCardDto, NoteDetailDto, PaginatedResponse, TagRefDto
+from app.domain.notes import NoteCardResult, NoteListResult, NoteResult, NoteService
 
 
 api_notes_router = APIRouter(prefix="/notes", tags=["notes"])
@@ -16,9 +16,44 @@ def create_note(service: NoteService = Depends(get_note_service)) -> NoteDetailD
     return _to_note_detail_dto(service.create_note())
 
 
+@api_notes_router.get("", response_model=PaginatedResponse[NoteCardDto])
+def list_notes(
+    q: str | None = Query(default=None),
+    folder_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=0),
+    offset: int = Query(default=0, ge=0),
+    service: NoteService = Depends(get_note_service),
+) -> PaginatedResponse[NoteCardDto]:
+    return _to_note_list_dto(service.list_notes(q=q, folder_id=folder_id, limit=limit, offset=offset))
+
+
 @api_notes_router.get("/{note_id}", response_model=NoteDetailDto)
 def get_note(note_id: UUID, service: NoteService = Depends(get_note_service)) -> NoteDetailDto:
     return _to_note_detail_dto(service.get_note(note_id))
+
+
+def _to_note_list_dto(note_list: NoteListResult) -> PaginatedResponse[NoteCardDto]:
+    return PaginatedResponse[NoteCardDto](
+        items=[_to_note_card_dto(note) for note in note_list.items],
+        total=note_list.total,
+        limit=note_list.limit,
+        offset=note_list.offset,
+    )
+
+
+def _to_note_card_dto(note: NoteCardResult) -> NoteCardDto:
+    return NoteCardDto(
+        id=note.id,
+        title=note.title,
+        summary=note.summary,
+        updated_at=note.updated_at,
+        tags=[TagRefDto.model_validate(tag) for tag in note.tags],
+        folder_id=note.folder_id,
+        status=note.status,
+        has_warnings=note.has_warnings,
+        warnings_count=note.warnings_count,
+        score=note.score,
+    )
 
 
 def _to_note_detail_dto(note: NoteResult) -> NoteDetailDto:

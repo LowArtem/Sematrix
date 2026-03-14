@@ -397,8 +397,8 @@
             "When q is empty after tag extraction, listing can return results sorted by updated_at desc, id desc"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Section 4.10.3 fixes the endpoint and parameters. Hybrid search ranking details are handled separately but must be served through this same endpoint."
+          "passes": true,
+          "notes": "Section 4.10.3 fixes the endpoint and parameters. Hybrid search ranking details are handled separately but must be served through this same endpoint. Added `GET /api/notes` with the fixed `q`, `folder_id`, `limit`, and `offset` query params, `PaginatedResponse[NoteCardDto]` output, backend hashtag extraction with AND tag filtering, and stable `updated_at desc, id desc` ordering for the current non-hybrid listing path."
         },
         {
           "id": "US-026",

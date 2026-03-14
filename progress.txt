@@ -20,6 +20,7 @@
 - Keep structured logging context centralized in `app/core/logging.py`; bind API `X-Request-Id` in middleware and Celery `task_id` in worker bootstrap so route/task code can stay focused on domain work.
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
+- Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 
 ## [2026-03-14 19:39:39 +0300] - EP-004 / US-024
 Epic: Folders, tags, assets, and note CRUD domain flows
@@ -53,6 +54,40 @@ Thread: CLI run
     - The domain-level `NotFoundError` message is preserved by the shared API error handler, so runtime smoke checks should assert the note-specific 404 message instead of Starlette's generic one.
   - Useful context
     - `GET /api/notes/{id}` now returns the same Draft defaults as `POST /api/notes`, which gives the frontend a consistent full-detail payload on both create and reload paths.
+---
+
+## [2026-03-14 19:46:05 +0300] - EP-004 / US-025
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement GET /api/notes base listing endpoint contract
+Thread: CLI run
+- What was implemented
+  - Added `GET /api/notes` in `backend/app/api/routes/notes.py`, returning `PaginatedResponse[NoteCardDto]` with the fixed `q`, `folder_id`, `limit`, and `offset` query parameters.
+  - Extended `backend/app/domain/notes.py` and `backend/app/infra/notes.py` with note-list service/repository flows that parse `#tags` out of `q`, normalize them through the shared tag rules, apply AND-style tag filtering, and keep the current non-search listing path on stable `updated_at desc, id desc` ordering.
+  - Added `backend/tests/test_note_list_api.py` and a scratch-Postgres container smoke test that seeds folders/tags/notes directly, verifies folder filtering plus stable ordering, and checks combined text-plus-hashtag requests return the expected single note with `score=null` before the hybrid-search epic lands.
+- Files changed
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_list_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (38 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... GET /api/notes smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-025` as passed and added a durable note about the fixed listing contract, backend hashtag parsing, AND tag filtering, and stable fallback ordering.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, note save/delete/reindex, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-list query parsing in the domain layer so `#tag` extraction and normalized-tag filtering can be reused later when the search epic swaps the backend ranking strategy.
+  - Gotchas encountered
+    - A tag-only query like `#alpha #beta` becomes an empty text query after hashtag extraction, so the repository still needs a stable non-search ordering path even when `q` was not literally empty on input.
+  - Useful context
+    - The current `GET /api/notes` path already returns `score: null` and the final card payload shape, which lets the later search epic replace ranking internals without changing the frontend contract.
 ---
 
 ## [2026-03-14 19:30:29 +0300] - EP-004 / US-021
