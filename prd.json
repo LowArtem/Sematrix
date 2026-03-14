@@ -457,13 +457,13 @@
             "GET /api/assets/{asset_id} returns the binary file with correct Content-Type"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Image uploads are allowed even while the note is still Draft. assetId, not data URL, is the source of truth in content_json."
+          "passes": true,
+          "notes": "Image uploads are allowed even while the note is still Draft. assetId, not data URL, is the source of truth in content_json. Added `/api/assets/image` and `/api/assets/{asset_id}` through a dedicated asset service/repository flow that validates `note_id`, MIME type, and `MAX_IMAGE_MB`, writes files under `./data/assets`, creates `assets` plus `note_assets` immediately, and serves the binary file back with the stored Content-Type."
         }
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics. It still remains open because the tag listing and asset upload/retrieval stories are not finished yet."
+      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics. It still remains open because only the tag listing story is unfinished."
     },
     {
       "id": "EP-005",

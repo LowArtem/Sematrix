@@ -17,7 +17,25 @@ class NotFoundError(DomainError):
     message = "Resource not found"
 
 
+class BadRequestError(DomainError):
+    status_code = 400
+    code = "bad_request"
+    message = "Bad request"
+
+
 class ConflictError(DomainError):
     status_code = 409
     code = "conflict"
     message = "Conflict"
+
+
+class PayloadTooLargeError(DomainError):
+    status_code = 413
+    code = "payload_too_large"
+    message = "Payload too large"
+
+
+class UnsupportedMediaTypeError(DomainError):
+    status_code = 415
+    code = "unsupported_media_type"
+    message = "Unsupported media type"

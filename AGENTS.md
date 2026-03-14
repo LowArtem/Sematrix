@@ -66,6 +66,7 @@ Backend foundation convention:
 - Keep public API error normalization centralized in `backend/app/api/errors.py` and register FastAPI exception handlers during app bootstrap instead of per-route try/except shaping.
 - Keep structured logging context centralized in `backend/app/core/logging.py`, with API `X-Request-Id` binding registered from `backend/app/api/middleware.py` and Celery `task_id` binding registered from worker bootstrap instead of ad hoc per-handler logger setup.
 - Keep request-scoped SQLAlchemy sessions in `backend/app/api/dependencies.py` and build repository-backed domain services from those dependencies instead of opening database sessions inside route handlers.
+- Keep file-backed asset persistence in `backend/app/infra/assets.py`, and remove any just-written file on database rollback so `assets` / `note_assets` rows cannot drift from the filesystem.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.

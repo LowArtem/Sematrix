@@ -23,6 +23,46 @@
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
+- For file-backed asset uploads, validate MIME/size in the domain service and unlink the just-written file on database rollback so `./data/assets` stays consistent with `assets` and `note_assets`.
+
+## [2026-03-14 20:18:35 +0300] - EP-004 / US-029
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement image upload and asset retrieval endpoints
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/api/routes/assets.py` plus router/dependency wiring so `POST /api/assets/image` accepts multipart uploads for an existing note and `GET /api/assets/{asset_id}` serves the stored binary file.
+  - Added `backend/app/domain/assets.py`, expanded `backend/app/infra/assets.py`, and extended `backend/app/domain/errors.py` so image uploads validate `note_id`, MIME type, and `MAX_IMAGE_MB`, write files under `./data/assets`, create `assets` plus `note_assets` immediately, and remove the file again if the database write fails.
+  - Added `python-multipart` to `backend/requirements.txt` and added `backend/tests/test_asset_api.py` source guards for the new route, dependency, validation, and file-serving behavior.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dependencies.py`
+  - `backend/app/api/router.py`
+  - `backend/app/api/routes/assets.py`
+  - `backend/app/domain/assets.py`
+  - `backend/app/domain/errors.py`
+  - `backend/app/infra/assets.py`
+  - `backend/requirements.txt`
+  - `backend/tests/test_asset_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (50 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... POST /api/notes + POST /api/assets/image + GET /api/assets/{id} smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-029` as passed and added a durable note about the dedicated asset service/repository flow, immediate `note_assets` linking, and stored Content-Type file serving.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep file-backed asset upload validation in a dedicated asset domain service, while the repository owns filesystem writes and DB rollback cleanup so asset metadata and stored files stay in sync.
+  - Gotchas encountered
+    - FastAPI multipart routes need `python-multipart` installed at runtime; otherwise app startup fails before the new upload endpoint can register.
+  - Useful context
+    - `GET /api/assets/{asset_id}` now serves the persisted file with the MIME type stored in the `assets` row, so Tiptap image nodes can safely derive `src` from `/api/assets/{assetId}`.
+---
 
 ## [2026-03-14 20:06:39 +0300] - EP-004 / US-027
 Epic: Folders, tags, assets, and note CRUD domain flows
