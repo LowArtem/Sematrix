@@ -102,6 +102,29 @@ Thread: CLI run
     - `TagDto.normalized_name` currently mirrors the stored lowercase `tags.name`, which keeps the public contract explicit without introducing a second persistence field.
 ---
 
+## [2026-03-14 20:27:00 +0300] - EP-004 / epic-finalization
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Finalize EP-004 on the integration branch
+Thread: CLI run
+- What was implemented
+  - Fast-forward merged `ralph/sematrix-mvp/ep-004-note-crud-assets-tags` into the shared integration branch `ralph/sematrix-mvp-base` after the last EP-004 story passed.
+  - Revalidated the merged integration branch with the backend pytest suite so the full CRUD/tag/asset backend surface from EP-004 remains green after merge.
+- Files changed
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (55 passed)
+- PRD updates made
+  - None beyond the already-merged `US-022` and `EP-004` pass-state updates from the epic branch.
+- Learnings for future iterations:
+  - Patterns discovered
+    - When an epic branch is already ahead of the integration branch and no extra integration-only edits are needed, `git merge --ff-only` keeps epic finalization clean and traceable.
+  - Gotchas encountered
+    - Re-run at least the repo's baseline automated check after an integration-branch fast-forward, because the merge may bring in multiple earlier story commits at once.
+  - Useful context
+    - `ralph/sematrix-mvp-base` now contains the full EP-004 backend CRUD/tag/asset implementation history.
+---
+
 ## [2026-03-14 20:06:39 +0300] - EP-004 / US-027
 Epic: Folders, tags, assets, and note CRUD domain flows
 Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
