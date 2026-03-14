@@ -7,7 +7,7 @@ set -e
 
 # Parse arguments
 TOOL="codex"  # Default to codex
-MAX_ITERATIONS=0
+MAX_ITERATIONS=3
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -40,7 +40,7 @@ PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 CODEX_DRIVER=${CODEX_DRIVER:-codex}
-CODEX_MODEL=${CODEX_MODEL:-openai/gpt-5.2-codex}
+CODEX_MODEL=${CODEX_MODEL:-openai/gpt-5.4}
 CODEX_AGENT=${CODEX_AGENT:-build}
 
 has_incomplete_stories() {

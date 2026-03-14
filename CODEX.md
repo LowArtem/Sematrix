@@ -31,7 +31,7 @@ You are an autonomous coding agent working on a software project.
 6. Implement that single user story only. Do not implement multiple user stories in one run.
 7. Run quality checks (typecheck, lint, test — use whatever your project requires). Backpressure is mandatory: if you cannot identify a real check command/config in the repo, treat the story as BLOCKED (see Backpressure Requirements).
 8. Update `AGENTS.md` files if you discover reusable patterns (see below).
-9. If checks pass, commit **ALL** changes with message: `feat: [Story ID] - [Story Title]`.
+9. If checks pass, commit **ALL** changes with message: `feat: <UserStory ID> - <UserStory Title>` where UserStoryId is the `id` of corresponding userStory item from prd.json and UserStory Title is its title.
 10. Update the PRD:
     - In **Nested PRD mode**:
       - Set the completed user story `passes: true`.

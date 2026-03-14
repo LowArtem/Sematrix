@@ -74,7 +74,7 @@ if [ -z "${CODEX_DRIVER:-}" ]; then
   fi
 fi
 export CODEX_DRIVER
-: "${CODEX_MODEL:=openai/gpt-5.2-codex}"
+: "${CODEX_MODEL:=openai/gpt-5.4}"
 
 print_banner() {
   local greeting="$1"
