@@ -30,15 +30,46 @@ class OllamaClient:
             "Return plain text only, in 1-2 concise sentences, and do not add bullets or labels.\n\n"
             f"{search_text}"
         )
-        payload = self._post_json(
-            "/api/generate",
-            {
-                "model": self._llm_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0},
-            },
+        payload = self._generate_text(prompt=prompt)
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
+    def generate_fast_summary(
+        self,
+        *,
+        title: str,
+        content_text_flat: str,
+        tag_names: list[str],
+    ) -> str:
+        tags_block = ", ".join(tag_names) if tag_names else "none"
+        prompt = (
+            "/no_think\n"
+            "Write a short note-card summary in 1-2 concise sentences. "
+            "Return plain text only, with no bullets or labels.\n\n"
+            f"Title: {title or '(empty)'}\n"
+            f"Tags: {tags_block}\n"
+            "Content:\n"
+            f"{content_text_flat}"
         )
+        payload = self._generate_text(prompt=prompt)
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
+    def generate_title(self, *, content_text_flat: str, tag_names: list[str]) -> str:
+        tags_block = ", ".join(tag_names) if tag_names else "none"
+        prompt = (
+            "/no_think\n"
+            "Generate a short plain-text note title. "
+            "Return only the title text, with no quotes, bullets, or labels.\n\n"
+            f"Tags: {tags_block}\n"
+            "Content:\n"
+            f"{content_text_flat}"
+        )
+        payload = self._generate_text(prompt=prompt)
         response_text = payload.get("response")
         if not isinstance(response_text, str):
             raise OllamaClientError("Ollama generate response did not include text")
@@ -64,6 +95,17 @@ class OllamaClient:
             return [float(value) for value in embedding]
         except (TypeError, ValueError) as exc:
             raise OllamaClientError("Ollama embed response returned a non-numeric embedding") from exc
+
+    def _generate_text(self, *, prompt: str) -> dict[str, Any]:
+        return self._post_json(
+            "/api/generate",
+            {
+                "model": self._llm_model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+        )
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         target = f"{self._base_url}{path}"

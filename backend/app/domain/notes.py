@@ -9,6 +9,7 @@ from uuid import UUID
 from app.core import get_logger
 from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
+from app.domain.pipeline import build_processing_warning, build_search_text
 from app.domain.errors import NotFoundError
 from app.domain.tags import normalize_tag_names
 from app.infra.notes import DraftCleanupRecord, NoteRecord, NoteRepository
@@ -82,14 +83,28 @@ class PipelineDispatcher(Protocol):
     def start_pipeline(self, *, note_id: UUID, index_version: int, request_id: str | None) -> None: ...
 
 
+class NoteGenerationClient(Protocol):
+    def generate_fast_summary(
+        self,
+        *,
+        title: str,
+        content_text_flat: str,
+        tag_names: list[str],
+    ) -> str: ...
+
+    def generate_title(self, *, content_text_flat: str, tag_names: list[str]) -> str: ...
+
+
 class NoteService:
     def __init__(
         self,
         note_repository: NoteRepository,
         pipeline_dispatcher: PipelineDispatcher,
+        note_generation_client: NoteGenerationClient,
     ) -> None:
         self._note_repository = note_repository
         self._pipeline_dispatcher = pipeline_dispatcher
+        self._note_generation_client = note_generation_client
 
     def create_note(self) -> NoteResult:
         return self._to_result(self._note_repository.create_note())
@@ -156,14 +171,35 @@ class NoteService:
         request_id: str | None,
     ) -> NoteSaveOutcome:
         parsed_content = parse_note_content(content_json)
+        normalized_title = title.strip()
         should_start_processing = has_meaningful_content(
             content_text_flat=parsed_content.content_text_flat,
             asset_count=len(parsed_content.asset_ids),
             link_count=len(parsed_content.links),
         )
+        effective_title = normalized_title
+        fast_summary = ""
+        processing_warnings: list[dict[str, object]] = []
+
+        if should_start_processing:
+            effective_title, title_warnings = self._resolve_title(
+                note_id=note_id,
+                title=normalized_title,
+                content_text_flat=parsed_content.content_text_flat,
+                tag_names=tags,
+            )
+            processing_warnings.extend(title_warnings)
+            fast_summary, summary_warnings = self._build_fast_summary(
+                note_id=note_id,
+                title=effective_title,
+                content_text_flat=parsed_content.content_text_flat,
+                tag_names=tags,
+            )
+            processing_warnings.extend(summary_warnings)
+
         save_result = self._note_repository.save_note(
             note_id=note_id,
-            title=title.strip(),
+            title=effective_title,
             folder_id=folder_id,
             tag_names=tags,
             content_json=content_json,
@@ -171,6 +207,8 @@ class NoteService:
             asset_ids=parsed_content.asset_ids,
             links=parsed_content.links,
             should_start_processing=should_start_processing,
+            summary=fast_summary,
+            processing_warnings=processing_warnings,
             request_id=request_id,
         )
 
@@ -199,6 +237,71 @@ class NoteService:
             note=self._to_result(save_result.note),
             pipeline_started=save_result.pipeline_started,
         )
+
+    def _resolve_title(
+        self,
+        *,
+        note_id: UUID,
+        title: str,
+        content_text_flat: str,
+        tag_names: list[str],
+    ) -> tuple[str, list[dict[str, object]]]:
+        if title:
+            return title, []
+
+        try:
+            generated_title = self._note_generation_client.generate_title(
+                content_text_flat=content_text_flat,
+                tag_names=tag_names,
+            ).strip()
+            if generated_title:
+                return generated_title, []
+            raise ValueError("Generated title was empty")
+        except Exception as exc:
+            fallback_title = build_title_fallback(content_text_flat)
+            warning = build_processing_warning(
+                stage="title_generation",
+                target=str(note_id),
+                code="title_generation_failed",
+                message=str(exc),
+                retryable=False,
+            )
+            return fallback_title, [warning]
+
+    def _build_fast_summary(
+        self,
+        *,
+        note_id: UUID,
+        title: str,
+        content_text_flat: str,
+        tag_names: list[str],
+    ) -> tuple[str, list[dict[str, object]]]:
+        fast_summary_source = build_search_text(
+            title=title,
+            content_text_flat=content_text_flat,
+            tag_names=tag_names,
+            asset_texts=[],
+            link_texts=[],
+        )
+        if not fast_summary_source:
+            return "", []
+
+        try:
+            summary = self._note_generation_client.generate_fast_summary(
+                title=title,
+                content_text_flat=content_text_flat,
+                tag_names=tag_names,
+            ).strip()
+            return summary, []
+        except Exception as exc:
+            warning = build_processing_warning(
+                stage="summary_fast",
+                target=str(note_id),
+                code="summary_fast_failed",
+                message=str(exc),
+                retryable=False,
+            )
+            return "", [warning]
 
     @staticmethod
     def _to_result(note: NoteRecord) -> NoteResult:
@@ -267,3 +370,14 @@ def parse_note_query(q: str | None) -> ParsedNoteQuery:
         text_query=normalized_text_query,
         tag_names=normalized_tag_names,
     )
+
+
+def build_title_fallback(content_text_flat: str, *, max_length: int = 120) -> str:
+    for raw_line in content_text_flat.splitlines():
+        normalized_line = " ".join(raw_line.split())
+        if not normalized_line:
+            continue
+        if len(normalized_line) <= max_length:
+            return normalized_line
+        return f"{normalized_line[: max_length - 3].rstrip()}..."
+    return ""

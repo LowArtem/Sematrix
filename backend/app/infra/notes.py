@@ -100,6 +100,8 @@ class NoteRepository(Protocol):
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        summary: str,
+        processing_warnings: list[dict[str, object]],
         request_id: str | None,
     ) -> SaveNoteRecord: ...
 
@@ -228,6 +230,8 @@ class SqlAlchemyNoteRepository:
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        summary: str,
+        processing_warnings: list[dict[str, object]],
         request_id: str | None,
     ) -> SaveNoteRecord:
         note = self._get_note_with_relations(note_id)
@@ -255,10 +259,11 @@ class SqlAlchemyNoteRepository:
         if should_start_processing:
             note.index_version += 1
             note.status = "Processing"
+            note.summary = summary
             note.processing_error = None
-            note.has_warnings = False
-            note.warnings_count = 0
-            note.processing_warnings = []
+            note.has_warnings = bool(processing_warnings)
+            note.warnings_count = len(processing_warnings)
+            note.processing_warnings = processing_warnings
             pipeline_run = self._create_pipeline_run(
                 note_id=note.id,
                 index_version=note.index_version,

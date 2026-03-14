@@ -34,6 +34,7 @@
 - Keep pipeline failure handling in `app/infra/pipeline.py` so `pipeline_failed` can revalidate runtime state, downgrade non-critical stage failures into note warnings, and fall back to a shared finalizer or Error write from one place.
 - Keep the fixed Celery retry policy encoded on the worker task definitions themselves so link processing gets 3 total attempts with exponential backoff while OCR/image-caption get 2 total attempts without drifting from the spec.
 - For Draft TTL cleanup, evaluate emptiness from parsed `content_json` with the shared meaningful-content rule instead of raw `note_assets` rows alone, so abandoned pre-save uploads remain cleanup-eligible while orphaned asset files can still be removed.
+- Keep save-time title and fast-summary generation behind an injected `app/infra/ollama.py` client in `NoteService`, so meaningful saves can prefill card data and persist non-fatal generation warnings while tests swap in fakes without touching route handlers.
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
@@ -69,6 +70,42 @@ Thread: CLI run
     - Warning-only errbacks still need to re-enter `finalize_pipeline`; otherwise a failed non-critical stage can leave the note stuck in `Processing` even though the base index is still buildable.
   - Useful context
     - Ready notes can now persist warning metadata straight from `processing_warnings`, so the later OCR/link/caption stories only need to populate per-run warning payloads or explicit errback metadata for the UI to surface them.
+---
+
+## [2026-03-14 21:54:21 +0300] - EP-005 / US-039
+Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
+Epic Branch: ralph/sematrix-mvp/ep-005-pipeline-orchestration
+Story: Implement fast post-save summary generation and title autogeneration fallback behavior
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/domain/notes.py` so meaningful saves now use an injected note-generation client to attempt title generation when `title` is empty, fall back to the first non-empty content line when generation fails, generate a fast non-thinking summary from title/content/tags, and persist non-fatal generation warnings.
+  - Updated `backend/app/infra/notes.py`, `backend/app/api/dependencies.py`, and `backend/app/infra/ollama.py` so save-time summary/title generation uses the shared infra Ollama adapter, stores the fast summary plus pre-finalization warnings on Processing notes, and keeps route handlers free of model-calling logic.
+  - Added `backend/tests/test_note_fast_summary.py`, refreshed `AGENTS.md`, and smoke-tested the backend container against scratch PostgreSQL with fake note-generation clients covering both successful title generation and fallback-with-warning behavior.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dependencies.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/app/infra/ollama.py`
+  - `backend/tests/test_note_fast_summary.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (78 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... NoteService save smoke test with fake generation client success + title fallback warning ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-039` as passed and added a durable note about save-time fast summary generation, injected Ollama note generation, title fallback, and non-fatal title warnings.
+  - Re-evaluated `EP-005`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep save-time title and fast-summary generation behind an injected Ollama client in `NoteService` so the API can prefill card data immediately while finalization still owns the final summary.
+  - Gotchas encountered
+    - The title fallback rule uses the first non-empty line of `content_text_flat`, not the whole flattened body, so newline-preserving text nodes can intentionally produce a short fallback title.
+  - Useful context
+    - Pre-finalization warnings stored during save now flow through the existing finalizer warning merge, so a title-generation failure can still end in `Ready` without special-case finalization code.
 ---
 
 ## [2026-03-14 21:21:26 +0300] - EP-005 / US-035

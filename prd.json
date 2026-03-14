@@ -619,13 +619,13 @@
             "Title generation failure is recorded as a processing warning, not a fatal error"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "All summarization tasks must explicitly disable thinking/reasoning. Title generation is separate from summary generation and is explicitly non-fatal."
+          "passes": true,
+          "notes": "All summarization tasks must explicitly disable thinking/reasoning. Title generation is separate from summary generation and is explicitly non-fatal. Save-time note generation now runs through an injected Ollama client in `NoteService`: meaningful saves prefill a fast non-thinking summary from title/content/tags, attempt title generation when `title` is empty, fall back to the first non-empty content line when title generation fails, and persist non-fatal title-generation warnings for finalization to carry forward."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs, the worker tasks now enforce the fixed retry policy for link/OCR/caption stages, and Celery beat now runs TTL cleanup for empty Draft notes using the same parsed-content meaningfulness rule as save-time lifecycle decisions. The remaining fast-summary/title lifecycle work still remains before the epic can pass."
+      "passes": true,
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings. Snapshot rows are now created transactionally at the start of Processing versions, `start_pipeline` now orchestrates snapshot-aware coarse-grained stage scheduling through Celery `group/chord` with direct-finalize fallback for zero-stage runs, the worker tasks now enforce the fixed retry policy for link/OCR/caption stages, Celery beat now runs TTL cleanup for empty Draft notes using the same parsed-content meaningfulness rule as save-time lifecycle decisions, and meaningful saves now prefill fast non-thinking summaries plus non-fatal title generation/fallback behavior before final pipeline summary regeneration."
     },
     {
       "id": "EP-006",

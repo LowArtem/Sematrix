@@ -13,6 +13,7 @@ from app.infra import SessionLocal
 from app.infra.assets import SqlAlchemyAssetRepository
 from app.infra.folders import SqlAlchemyFolderRepository
 from app.infra.notes import SqlAlchemyNoteRepository
+from app.infra.ollama import OllamaClient
 from app.infra.pipeline import CeleryPipelineDispatcher
 from app.infra.system import RuntimeMetadataRepository
 from app.infra.tags import SqlAlchemyTagRepository
@@ -46,7 +47,13 @@ def get_asset_service(session: Session = Depends(get_db_session)) -> AssetServic
 
 
 def get_note_service(session: Session = Depends(get_db_session)) -> NoteService:
+    settings = get_settings()
     return NoteService(
         note_repository=SqlAlchemyNoteRepository(session=session),
         pipeline_dispatcher=CeleryPipelineDispatcher(),
+        note_generation_client=OllamaClient(
+            base_url=settings.ollama_url,
+            llm_model=settings.llm_model,
+            embed_model=settings.embed_model,
+        ),
     )
