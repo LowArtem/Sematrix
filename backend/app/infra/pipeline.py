@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html.parser import HTMLParser
+from http import HTTPStatus
+from html import unescape
+import re
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Protocol
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from celery import chord, group
@@ -20,8 +25,13 @@ from app.domain.pipeline import (
     merge_processing_warnings,
     normalize_pipeline_stage_name,
 )
-from app.infra.models import AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
-from app.infra.ollama import OllamaClient
+from app.infra.assets import get_asset_path
+from app.infra.link_fetcher import LinkFetchError, SafeLinkFetcher
+from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
+from app.infra.ocr import OcrClientError, PaddleOcrClient
+from app.infra.ollama import OllamaClient, OllamaClientError
+from app.infra.web_pages import extract_main_text
+from app.infra.youtube import YouTubeDataApiClient, YouTubeDataApiClientError
 from app.workers.celery_app import celery_app
 
 
@@ -73,11 +83,163 @@ class AssetProcessingTextResult:
 
 
 @dataclass(frozen=True)
+class SnapshotAssetRecord:
+    asset_id: UUID
+    storage_key: str
+
+
+@dataclass(frozen=True)
+class SnapshotLinkRecord:
+    link_id: UUID
+    url: str
+    normalized_url: str
+    link_type: str
+
+
+@dataclass(frozen=True)
 class LinkProcessingTextResult:
     url: str
     page_title: str
     extracted_text: str
     generated_summary: str
+
+
+@dataclass(frozen=True)
+class WebPageFallbackResult:
+    page_title: str
+    extracted_text: str
+    generated_summary: str
+    metadata_json: dict[str, object]
+    content_type: str | None
+
+
+class HtmlMetadataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.page_title = ""
+        self.meta_description = ""
+        self._inside_title = False
+        self._title_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {name.lower(): value or "" for name, value in attrs}
+        if tag.lower() == "title":
+            self._inside_title = True
+            return
+        if tag.lower() != "meta" or self.meta_description:
+            return
+
+        name = attributes.get("name", "").strip().lower()
+        property_name = attributes.get("property", "").strip().lower()
+        if name not in {"description"} and property_name not in {"og:description"}:
+            return
+
+        content = attributes.get("content", "").strip()
+        if content:
+            self.meta_description = content
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "title":
+            self._inside_title = False
+            if not self.page_title:
+                self.page_title = " ".join(chunk.strip() for chunk in self._title_chunks if chunk.strip()).strip()
+
+    def handle_data(self, data: str) -> None:
+        if self._inside_title:
+            self._title_chunks.append(data)
+
+
+_CHARSET_RE = re.compile(r"charset=([A-Za-z0-9._-]+)", re.IGNORECASE)
+_TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml"})
+_HTML_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
+_TEXT_SUMMARY_PREVIEW_CHARS = 16000
+
+
+def _decode_link_body(body: bytes, *, content_type: str | None) -> str:
+    encoding = "utf-8"
+    if content_type:
+        charset_match = _CHARSET_RE.search(content_type)
+        if charset_match:
+            encoding = charset_match.group(1)
+
+    try:
+        return body.decode(encoding, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def _extract_html_metadata(document: str) -> tuple[str, str]:
+    parser = HtmlMetadataParser()
+    parser.feed(document)
+    parser.close()
+    page_title = unescape(parser.page_title).strip()
+    meta_description = unescape(parser.meta_description).strip()
+    return page_title, meta_description
+
+
+def _extract_url_extension(url: str) -> str:
+    path = urlsplit(url).path
+    if "." not in path.rsplit("/", 1)[-1]:
+        return ""
+    return f'.{path.rsplit(".", 1)[-1].lower()}'
+
+
+def _extract_link_source_name(url: str) -> str:
+    path = urlsplit(url).path
+    filename = unquote(path.rsplit("/", 1)[-1]).strip()
+    if filename:
+        return filename
+    return url
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    if not content_type:
+        return ""
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+def _is_text_file_content_type(content_type: str | None) -> bool:
+    media_type = _normalize_content_type(content_type)
+    return media_type.startswith("text/") and media_type != "text/html"
+
+
+def _is_html_content_type(content_type: str | None) -> bool:
+    media_type = _normalize_content_type(content_type)
+    return media_type in _HTML_CONTENT_TYPES
+
+
+def _build_text_file_summary_fallback(*, source_name: str, content_text: str) -> str:
+    normalized_text = " ".join(content_text.split())
+    if not normalized_text:
+        return f'Text file "{source_name}" was processed.'
+    preview = normalized_text[:240].rstrip()
+    if len(normalized_text) > 240:
+        preview = f"{preview}..."
+    return f'Text file "{source_name}": {preview}'
+
+
+def _build_web_page_summary_fallback(
+    *,
+    page_title: str,
+    meta_description: str,
+    extracted_text: str,
+    url: str,
+) -> str:
+    normalized_description = " ".join(meta_description.split())
+    if normalized_description:
+        preview = normalized_description[:240].rstrip()
+        if len(normalized_description) > 240:
+            preview = f"{preview}..."
+    else:
+        normalized_text = " ".join(extracted_text.split())
+        preview = normalized_text[:240].rstrip()
+        if len(normalized_text) > 240:
+            preview = f"{preview}..."
+
+    title = page_title.strip()
+    if title:
+        return f'Web page "{title}": {preview or url}'
+    return f"Web page {url}: {preview or 'processed successfully.'}"
 
 
 class PipelineRuntimeRepository(Protocol):
@@ -93,7 +255,21 @@ class PipelineRuntimeRepository(Protocol):
 
     def list_snapshot_asset_ids(self, *, note_id: UUID, snapshot_asset_ids: list[UUID]) -> list[UUID]: ...
 
+    def list_snapshot_assets(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]: ...
+
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]: ...
+
+    def list_snapshot_links(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]: ...
 
     def get_finalization_runtime_state(
         self,
@@ -149,6 +325,55 @@ class PipelineRuntimeRepository(Protocol):
         pipeline_run_id: UUID,
         warning: dict[str, object],
     ) -> bool: ...
+
+    def store_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> bool: ...
+
+    def store_asset_ocr_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        ocr_text: str,
+        ocr_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
+
+    def store_asset_caption_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        caption_text: str,
+        caption_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
+
+    def store_link_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        link_id: UUID,
+        page_title: str,
+        content_type: str | None,
+        extracted_text: str,
+        generated_summary: str,
+        metadata_json: dict[str, object],
+        fetch_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
 
     def fail_pipeline_run(
         self,
@@ -229,6 +454,29 @@ class SqlAlchemyPipelineRuntimeRepository:
         )
         return [asset_id for asset_id in snapshot_asset_ids if asset_id in existing_asset_ids]
 
+    def list_snapshot_assets(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]:
+        if not snapshot_asset_ids:
+            return []
+
+        rows = self._session.execute(
+            select(Asset.id, Asset.storage_key)
+            .join(NoteAsset, NoteAsset.asset_id == Asset.id)
+            .where(
+                NoteAsset.note_id == note_id,
+                Asset.id.in_(snapshot_asset_ids),
+            )
+        ).all()
+        assets_by_id = {
+            asset_id: SnapshotAssetRecord(asset_id=asset_id, storage_key=storage_key)
+            for asset_id, storage_key in rows
+        }
+        return [assets_by_id[asset_id] for asset_id in snapshot_asset_ids if asset_id in assets_by_id]
+
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]:
         if not snapshot_link_ids:
             return []
@@ -242,6 +490,32 @@ class SqlAlchemyPipelineRuntimeRepository:
             )
         )
         return [link_id for link_id in snapshot_link_ids if link_id in existing_link_ids]
+
+    def list_snapshot_links(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]:
+        if not snapshot_link_ids:
+            return []
+
+        rows = self._session.execute(
+            select(NoteLink.id, NoteLink.url, NoteLink.normalized_url, NoteLink.link_type).where(
+                NoteLink.note_id == note_id,
+                NoteLink.id.in_(snapshot_link_ids),
+            )
+        ).all()
+        links_by_id = {
+            link_id: SnapshotLinkRecord(
+                link_id=link_id,
+                url=url,
+                normalized_url=normalized_url,
+                link_type=link_type,
+            )
+            for link_id, url, normalized_url, link_type in rows
+        }
+        return [links_by_id[link_id] for link_id in snapshot_link_ids if link_id in links_by_id]
 
     def get_finalization_runtime_state(
         self,
@@ -430,6 +704,24 @@ class SqlAlchemyPipelineRuntimeRepository:
         pipeline_run_id: UUID,
         warning: dict[str, object],
     ) -> bool:
+        return self.store_processing_warnings(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            warnings=[warning],
+        )
+
+    def store_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> bool:
+        if not warnings:
+            return True
+
         note = self._session.get(Note, note_id)
         pipeline_run = self._session.get(PipelineRun, pipeline_run_id)
         if note is None or pipeline_run is None:
@@ -441,7 +733,7 @@ class SqlAlchemyPipelineRuntimeRepository:
 
         merged_warnings = merge_processing_warnings(
             self._normalize_processing_warnings(note.processing_warnings),
-            [warning],
+            warnings,
         )
         note.processing_warnings = merged_warnings
         note.has_warnings = bool(merged_warnings)
@@ -450,6 +742,123 @@ class SqlAlchemyPipelineRuntimeRepository:
         self._session.add(note)
         self._session.commit()
         return True
+
+    def store_asset_ocr_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        ocr_text: str,
+        ocr_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(AssetProcessingResult).where(
+                AssetProcessingResult.note_id == note_id,
+                AssetProcessingResult.index_version == index_version,
+                AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                AssetProcessingResult.asset_id == asset_id,
+            )
+        )
+        if result is None:
+            result = AssetProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                asset_id=asset_id,
+                index_version=index_version,
+            )
+
+        preserved_warnings = [
+            warning
+            for warning in self._normalize_processing_warnings(result.warnings)
+            if str(warning.get("stage")) != "ocr"
+        ]
+        result.ocr_text = ocr_text
+        result.ocr_status = ocr_status
+        result.warnings = merge_processing_warnings(preserved_warnings, warnings)
+        self._session.add(result)
+        self._session.commit()
+
+    def store_asset_caption_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        caption_text: str,
+        caption_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(AssetProcessingResult).where(
+                AssetProcessingResult.note_id == note_id,
+                AssetProcessingResult.index_version == index_version,
+                AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                AssetProcessingResult.asset_id == asset_id,
+            )
+        )
+        if result is None:
+            result = AssetProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                asset_id=asset_id,
+                index_version=index_version,
+            )
+
+        preserved_warnings = [
+            warning
+            for warning in self._normalize_processing_warnings(result.warnings)
+            if str(warning.get("stage")) != "image_caption"
+        ]
+        result.caption_text = caption_text
+        result.caption_status = caption_status
+        result.warnings = merge_processing_warnings(preserved_warnings, warnings)
+        self._session.add(result)
+        self._session.commit()
+
+    def store_link_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        link_id: UUID,
+        page_title: str,
+        content_type: str | None,
+        extracted_text: str,
+        generated_summary: str,
+        metadata_json: dict[str, object],
+        fetch_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(LinkProcessingResult).where(
+                LinkProcessingResult.note_id == note_id,
+                LinkProcessingResult.index_version == index_version,
+                LinkProcessingResult.pipeline_run_id == pipeline_run_id,
+                LinkProcessingResult.link_id == link_id,
+            )
+        )
+        if result is None:
+            result = LinkProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                link_id=link_id,
+                index_version=index_version,
+            )
+
+        result.page_title = page_title
+        result.content_type = content_type
+        result.extracted_text = extracted_text
+        result.generated_summary = generated_summary
+        result.metadata_json = metadata_json
+        result.fetch_status = fetch_status
+        result.warnings = warnings
+        self._session.add(result)
+        self._session.commit()
 
     def fail_pipeline_run(
         self,
@@ -648,8 +1057,22 @@ class CeleryPipelineOrchestrator:
 
 
 class PipelineStageRunner:
-    def __init__(self, *, runtime_repository: PipelineRuntimeRepository) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_repository: PipelineRuntimeRepository,
+        ocr_client: PaddleOcrClient,
+        ollama_client: OllamaClient,
+        youtube_client: YouTubeDataApiClient,
+        link_fetcher: SafeLinkFetcher,
+        max_text_file_bytes: int,
+    ) -> None:
         self._runtime_repository = runtime_repository
+        self._ocr_client = ocr_client
+        self._ollama_client = ollama_client
+        self._youtube_client = youtube_client
+        self._link_fetcher = link_fetcher
+        self._max_text_file_bytes = max_text_file_bytes
 
     def process_links(
         self,
@@ -659,17 +1082,376 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_links",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_link_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_link_ids(
+        )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_links",
                 note_id=note_id,
-                snapshot_link_ids=snapshot_target_ids,
-            ),
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        links = self._runtime_repository.list_snapshot_links(
+            note_id=note_id,
+            snapshot_link_ids=runtime_state.snapshot_link_ids,
+        )
+        filtered_links = self._filter_snapshot_links(
+            stage_name="process_links",
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            links=links,
+            snapshot_link_ids=runtime_state.snapshot_link_ids,
+        )
+        links_by_id = {link.link_id: link for link in filtered_links}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for link_id in runtime_state.snapshot_link_ids:
+            link = links_by_id.get(link_id)
+            if link is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_links",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=link_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            if link.link_type not in {"youtube_video", "youtube_channel", "text_file", "web"}:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_links",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=link_id,
+                    skipped_reason="unsupported_link_type",
+                )
+                continue
+
+            processed_count += 1
+            warnings: list[dict[str, object]] = []
+            page_title = ""
+            extracted_text = ""
+            generated_summary = ""
+            metadata_json: dict[str, object] = {}
+            fetch_status = "error"
+            content_type: str | None = None
+
+            try:
+                if link.link_type == "youtube_video":
+                    metadata = self._youtube_client.fetch_video_metadata(url=link.url)
+                    page_title = metadata.title
+                    extracted_text = metadata.build_index_text()
+                    generated_summary = metadata.build_summary()
+                    metadata_json = metadata.to_metadata_dict()
+                    fetch_status = "done"
+                    content_type = "application/vnd.youtube.video+json"
+                else:
+                    if link.link_type == "youtube_channel":
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_youtube_channel_link(url=link.url)
+                    elif link.link_type == "text_file":
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_text_file_link(url=link.url)
+                    else:
+                        (
+                            page_title,
+                            extracted_text,
+                            generated_summary,
+                            metadata_json,
+                            fetch_status,
+                            warnings,
+                            content_type,
+                        ) = self._process_web_link(url=link.url)
+            except (LinkFetchError, YouTubeDataApiClientError) as exc:
+                warnings = [
+                    build_processing_warning(
+                        stage="link_fetch",
+                        target=link.url,
+                        code=f"{link.link_type}_fetch_failed",
+                        message=str(exc),
+                        retryable=getattr(exc, "retryable", False),
+                    )
+                ]
+            warning_count += len(warnings)
+
+            self._runtime_repository.store_link_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                link_id=link.link_id,
+                page_title=page_title,
+                content_type=content_type,
+                extracted_text=extracted_text,
+                generated_summary=generated_summary,
+                metadata_json=metadata_json,
+                fetch_status=fetch_status,
+                warnings=warnings,
+            )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_links",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_links",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
+
+    def _process_youtube_channel_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        metadata = None
+        try:
+            metadata = self._youtube_client.fetch_channel_metadata(url=url)
+        except YouTubeDataApiClientError as exc:
+            if not exc.retryable:
+                raise
+
+            fallback = self._fetch_web_fallback_for_youtube_channel(url=url)
+            warnings = [
+                build_processing_warning(
+                    stage="link_fetch",
+                    target=url,
+                    code="youtube_channel_api_fallback",
+                    message=f"YouTube Data API was temporarily unavailable; used web fallback instead: {exc}",
+                    retryable=False,
+                )
+            ]
+            return (
+                fallback.page_title,
+                fallback.extracted_text,
+                fallback.generated_summary,
+                fallback.metadata_json,
+                "done",
+                warnings,
+                fallback.content_type,
+            )
+
+        if metadata is None:
+            raise YouTubeDataApiClientError("YouTube channel metadata processing returned no result", retryable=True)
+
+        return (
+            metadata.title,
+            metadata.build_index_text(),
+            metadata.build_summary(),
+            metadata.to_metadata_dict(),
+            "done",
+            [],
+            "application/vnd.youtube.channel+json",
+        )
+
+    def _process_text_file_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(f"Text file fetch failed for {url}: HTTP {response.status_code}")
+        if len(response.body) > self._max_text_file_bytes:
+            raise LinkFetchError(f"Text file response exceeded MAX_TEXT_FILE_MB for {url}")
+
+        content_type = response.content_type
+        final_url = response.final_url
+        has_text_extension = _extract_url_extension(final_url) in _TEXT_FILE_EXTENSIONS
+        if not _is_text_file_content_type(content_type) and not has_text_extension:
+            raise LinkFetchError(f"Link did not resolve to a supported text file: {url}")
+
+        extracted_text = _decode_link_body(response.body, content_type=content_type).strip()
+        if not extracted_text:
+            raise LinkFetchError(f"Text file fetch returned empty text for {url}")
+
+        source_name = _extract_link_source_name(final_url)
+        warnings: list[dict[str, object]] = []
+        try:
+            generated_summary = self._ollama_client.generate_text_file_summary(
+                source_name=source_name,
+                content_text=extracted_text[:_TEXT_SUMMARY_PREVIEW_CHARS],
+            )
+        except OllamaClientError as exc:
+            generated_summary = _build_text_file_summary_fallback(
+                source_name=source_name,
+                content_text=extracted_text,
+            )
+            warnings = [
+                build_processing_warning(
+                    stage="link_summary",
+                    target=url,
+                    code="text_file_summary_failed",
+                    message=str(exc),
+                    retryable=False,
+                )
+            ]
+
+        metadata_json = {
+            "source": "text_file",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "content_type": response.content_type,
+            "size_bytes": len(response.body),
+            "detected_by": "content_type" if _is_text_file_content_type(content_type) else "extension",
+        }
+        return (
+            source_name,
+            extracted_text,
+            generated_summary,
+            metadata_json,
+            "done",
+            warnings,
+            content_type,
+        )
+
+    def _process_web_link(
+        self,
+        *,
+        url: str,
+    ) -> tuple[str, str, str, dict[str, object], str, list[dict[str, object]], str | None]:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(f"Web page fetch failed for {url}: HTTP {response.status_code}")
+
+        content_type = response.content_type
+        normalized_content_type = _normalize_content_type(content_type)
+        if normalized_content_type and not _is_html_content_type(content_type):
+            raise LinkFetchError(f"Link did not resolve to an HTML page: {url}")
+
+        decoded_body = _decode_link_body(response.body, content_type=content_type)
+        page_title, meta_description = _extract_html_metadata(decoded_body)
+        extracted_text = extract_main_text(html=decoded_body)
+        if not extracted_text:
+            raise LinkFetchError(f"Web page extraction returned no main text for {url}")
+
+        page_title = page_title or _extract_link_source_name(response.final_url)
+        warnings: list[dict[str, object]] = []
+        try:
+            generated_summary = self._ollama_client.generate_web_page_summary(
+                page_title=page_title,
+                page_text=extracted_text[:_TEXT_SUMMARY_PREVIEW_CHARS],
+            )
+        except OllamaClientError as exc:
+            generated_summary = _build_web_page_summary_fallback(
+                page_title=page_title,
+                meta_description=meta_description,
+                extracted_text=extracted_text,
+                url=response.final_url,
+            )
+            warnings = [
+                build_processing_warning(
+                    stage="link_summary",
+                    target=url,
+                    code="web_page_summary_failed",
+                    message=str(exc),
+                    retryable=False,
+                )
+            ]
+
+        metadata_json = {
+            "source": "web_page",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "content_type": response.content_type,
+            "page_title": page_title,
+            "meta_description": meta_description,
+            "extractor": "trafilatura_then_readability",
+        }
+        return (
+            page_title,
+            extracted_text,
+            generated_summary,
+            metadata_json,
+            "done",
+            warnings,
+            content_type,
+        )
+
+    def _fetch_web_fallback_for_youtube_channel(self, *, url: str) -> WebPageFallbackResult:
+        response = self._link_fetcher.fetch(url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise LinkFetchError(
+                f"Fallback web fetch failed for {url}: HTTP {response.status_code}"
+            )
+
+        decoded_body = _decode_link_body(response.body, content_type=response.content_type)
+        page_title, meta_description = _extract_html_metadata(decoded_body)
+        if not page_title and not meta_description:
+            raise LinkFetchError(f"Fallback web fetch returned no usable metadata for {url}")
+
+        extracted_text_parts = [page_title, meta_description, response.final_url]
+        extracted_text = "\n".join(part for part in extracted_text_parts if part)
+        generated_summary = meta_description or f'YouTube channel page "{page_title}".'
+        metadata_json = {
+            "source": "web_fallback",
+            "requested_url": response.requested_url,
+            "final_url": response.final_url,
+            "status_code": response.status_code,
+            "redirect_count": response.redirect_count,
+            "page_title": page_title,
+            "meta_description": meta_description,
+        }
+        return WebPageFallbackResult(
+            page_title=page_title,
+            extracted_text=extracted_text,
+            generated_summary=generated_summary,
+            metadata_json=metadata_json,
+            content_type=response.content_type,
         )
 
     def process_ocr(
@@ -680,18 +1462,114 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_ocr",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_asset_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_asset_ids(
-                note_id=note_id,
-                snapshot_asset_ids=snapshot_target_ids,
-            ),
         )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_ocr",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        assets = self._runtime_repository.list_snapshot_assets(
+            note_id=note_id,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        filtered_assets = self._filter_snapshot_assets(
+            stage_name="process_ocr",
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            assets=assets,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        assets_by_id = {asset.asset_id: asset for asset in filtered_assets}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for asset_id in runtime_state.snapshot_asset_ids:
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_ocr",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=asset_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            processed_count += 1
+            image_path = get_asset_path(asset.storage_key)
+            warnings: list[dict[str, object]] = []
+            try:
+                ocr_text = self._ocr_client.extract_text(image_path=image_path)
+                ocr_status = "done"
+            except OcrClientError as exc:
+                ocr_text = ""
+                ocr_status = "error"
+                warnings = [
+                    build_processing_warning(
+                        stage="ocr",
+                        target=str(asset.asset_id),
+                        code="ocr_failed",
+                        message=str(exc),
+                        retryable=False,
+                    )
+                ]
+                warning_count += len(warnings)
+
+            self._runtime_repository.store_asset_ocr_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                asset_id=asset.asset_id,
+                ocr_text=ocr_text,
+                ocr_status=ocr_status,
+                warnings=warnings,
+            )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_ocr",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_ocr",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
 
     def process_image_caption(
         self,
@@ -701,18 +1579,114 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_image_caption",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_asset_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_asset_ids(
-                note_id=note_id,
-                snapshot_asset_ids=snapshot_target_ids,
-            ),
         )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_image_caption",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        assets = self._runtime_repository.list_snapshot_assets(
+            note_id=note_id,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        filtered_assets = self._filter_snapshot_assets(
+            stage_name="process_image_caption",
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            assets=assets,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        assets_by_id = {asset.asset_id: asset for asset in filtered_assets}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for asset_id in runtime_state.snapshot_asset_ids:
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_image_caption",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=asset_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            processed_count += 1
+            image_path = get_asset_path(asset.storage_key)
+            warnings: list[dict[str, object]] = []
+            try:
+                caption_text = self._ollama_client.generate_image_caption(image_path=image_path)
+                caption_status = "done"
+            except OllamaClientError as exc:
+                caption_text = ""
+                caption_status = "error"
+                warnings = [
+                    build_processing_warning(
+                        stage="image_caption",
+                        target=str(asset.asset_id),
+                        code="image_caption_failed",
+                        message=str(exc),
+                        retryable=False,
+                    )
+                ]
+                warning_count += len(warnings)
+
+            self._runtime_repository.store_asset_caption_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                asset_id=asset.asset_id,
+                caption_text=caption_text,
+                caption_status=caption_status,
+                warnings=warnings,
+            )
+            self._store_note_processing_warnings(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_image_caption",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_image_caption",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
 
     def _run_stage(
         self,
@@ -725,53 +1699,21 @@ class PipelineStageRunner:
         snapshot_target_ids_getter: Callable[[PipelineStageRuntimeState], list[UUID]],
         existing_target_ids_loader: Callable[[list[UUID]], list[UUID]],
     ) -> dict[str, object]:
-        runtime_state = self._runtime_repository.get_stage_runtime_state(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
+            stage_name=stage_name,
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
         )
-        if runtime_state is None:
-            return self._build_skipped_stage_result(
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
                 stage_name=stage_name,
                 note_id=note_id,
                 index_version=index_version,
                 pipeline_run_id=pipeline_run_id,
                 request_id=request_id,
                 skipped_reason="missing_runtime_state",
-            )
-
-        if runtime_state.current_index_version != index_version:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="stale_version",
-            )
-
-        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="snapshot_mismatch",
-            )
-
-        expected_snapshot_hash = compute_snapshot_hash(
-            asset_ids=runtime_state.snapshot_asset_ids,
-            link_ids=runtime_state.snapshot_link_ids,
-        )
-        if runtime_state.snapshot_hash != expected_snapshot_hash:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="invalid_snapshot_hash",
             )
 
         snapshot_target_ids = snapshot_target_ids_getter(runtime_state)
@@ -824,6 +1766,132 @@ class PipelineStageRunner:
             "skipped_count": skipped_count,
             "skipped": False,
         }
+
+    def _store_note_processing_warnings(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        if not warnings:
+            return
+
+        self._runtime_repository.store_processing_warnings(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            warnings=warnings,
+        )
+
+    def _get_active_stage_runtime_state(
+        self,
+        *,
+        stage_name: str,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+    ) -> tuple[PipelineStageRuntimeState | None, dict[str, object] | None]:
+        runtime_state = self._runtime_repository.get_stage_runtime_state(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+        if runtime_state is None:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        if runtime_state.current_index_version != index_version:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="stale_version",
+            )
+
+        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="snapshot_mismatch",
+            )
+
+        expected_snapshot_hash = compute_snapshot_hash(
+            asset_ids=runtime_state.snapshot_asset_ids,
+            link_ids=runtime_state.snapshot_link_ids,
+        )
+        if runtime_state.snapshot_hash != expected_snapshot_hash:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="invalid_snapshot_hash",
+            )
+
+        return runtime_state, None
+
+    def _filter_snapshot_assets(
+        self,
+        *,
+        stage_name: str,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        assets: list[SnapshotAssetRecord],
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]:
+        filtered_asset_ids = set(
+            self._filter_snapshot_target_ids(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                candidate_target_ids=[asset.asset_id for asset in assets],
+                snapshot_target_ids=snapshot_asset_ids,
+            )
+        )
+        return [asset for asset in assets if asset.asset_id in filtered_asset_ids]
+
+    def _filter_snapshot_links(
+        self,
+        *,
+        stage_name: str,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        links: list[SnapshotLinkRecord],
+        snapshot_link_ids: list[UUID],
+    ) -> list[SnapshotLinkRecord]:
+        filtered_link_ids = set(
+            self._filter_snapshot_target_ids(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                candidate_target_ids=[link.link_id for link in links],
+                snapshot_target_ids=snapshot_link_ids,
+            )
+        )
+        return [link for link in links if link.link_id in filtered_link_ids]
 
     def _filter_snapshot_target_ids(
         self,
@@ -1356,7 +2424,27 @@ def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrat
 
 
 def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
-    return PipelineStageRunner(runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session))
+    settings = get_settings()
+    return PipelineStageRunner(
+        runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
+        ocr_client=PaddleOcrClient(),
+        ollama_client=OllamaClient(
+            base_url=settings.ollama_url,
+            llm_model=settings.llm_model,
+            embed_model=settings.embed_model,
+            vision_model=settings.vision_model,
+        ),
+        youtube_client=YouTubeDataApiClient(
+            api_key=settings.youtube_api_key,
+            timeout_sec=settings.link_fetch_timeout_sec,
+        ),
+        link_fetcher=SafeLinkFetcher(
+            timeout_sec=settings.link_fetch_timeout_sec,
+            max_response_bytes=settings.max_link_response_mb * 1024 * 1024,
+            max_redirects=settings.link_max_redirects,
+        ),
+        max_text_file_bytes=settings.max_text_file_mb * 1024 * 1024,
+    )
 
 
 def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:
@@ -1367,6 +2455,7 @@ def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:
             base_url=settings.ollama_url,
             llm_model=settings.llm_model,
             embed_model=settings.embed_model,
+            vision_model=settings.vision_model,
         ),
     )
 

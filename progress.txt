@@ -35,6 +35,287 @@
 - Keep the fixed Celery retry policy encoded on the worker task definitions themselves so link processing gets 3 total attempts with exponential backoff while OCR/image-caption get 2 total attempts without drifting from the spec.
 - For Draft TTL cleanup, evaluate emptiness from parsed `content_json` with the shared meaningful-content rule instead of raw `note_assets` rows alone, so abandoned pre-save uploads remain cleanup-eligible while orphaned asset files can still be removed.
 - Keep save-time title and fast-summary generation behind an injected `app/infra/ollama.py` client in `NoteService`, so meaningful saves can prefill card data and persist non-fatal generation warnings while tests swap in fakes without touching route handlers.
+- Keep OCR calls in `app/infra/ocr.py`, and have OCR/caption stages update only their own columns plus stage-specific warnings on shared `asset_processing_results` rows so reruns do not erase sibling stage outputs.
+- Keep image caption generation in `app/infra/ollama.py` and inject that client into `PipelineStageRunner`, so `process_image_caption` can reuse the configured vision model while tests swap in fakes without moving caption logic into Celery tasks.
+- Normalize extracted note URLs before syncing `note_links` by lowercasing scheme/host, removing fragments/default ports, and sorting query params so plain-text URLs and link marks collapse onto the same `normalized_url`.
+- Keep SSRF-safe link fetching in `app/infra/link_fetcher.py`, with a no-redirect opener plus per-hop scheme/port/DNS revalidation and streamed size/time limits before any link-specific parser touches the body.
+- Keep YouTube Data API calls in `app/infra/youtube.py`, and persist both structured metadata plus derived index text/summary on `link_processing_results` so finalization can consume official API output without HTML scraping.
+- For `youtube_channel` links, keep the YouTube Data API as the default path and use the shared SSRF-safe fetcher only for retryable API-failure fallback, recording that downgrade as a warning instead of changing the primary integration design.
+- Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
+- Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
+- Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+
+## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Persist per-object warnings for non-critical link and image failures
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/pipeline.py` so the runtime repository can merge multiple note-level warnings in one write and the OCR, image-caption, and link stages now mirror each per-object warning onto `notes.processing_warnings` immediately after persisting the durable per-run result row.
+  - Added `backend/tests/test_pipeline_warning_persistence.py` source guards that lock in the note-warning merge helper and the stage-runner mirroring behavior, while leaving finalization to deduplicate note-level warnings against the durable stage tables.
+  - Updated `AGENTS.md` with the reusable rule that per-object non-critical warnings should be surfaced on the note record during Processing, not only at finalization time.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_warning_persistence.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_warning_persistence.py backend/tests/test_pipeline_failure_handling.py backend/tests/test_pipeline_ocr_stage.py backend/tests/test_pipeline_image_caption_stage.py backend/tests/test_pipeline_web_page_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (120 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-048` as passed and added a durable note about immediate note-level warning mirroring plus finalization-time deduplication.
+  - Re-evaluated `EP-006`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Mirror per-object non-critical stage warnings onto the note row as soon as the stage persists its durable result, so REST polling can surface warnings before finalization without changing the final deduplication model.
+  - Gotchas encountered
+    - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
+  - Useful context
+    - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 01:34:54 +0300] - EP-006 / US-046
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement text-file link processing with size limits and summary generation
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now handles `text_file` snapshot links, fetches them through the shared SSRF-safe fetcher, enforces `MAX_TEXT_FILE_MB`, decodes and persists extracted text, and records text-file source metadata on `link_processing_results`.
+  - Added `backend/app/infra/ollama.py` support for non-thinking text-file summaries and a warning-backed heuristic fallback path so summary-generation failures do not discard successfully fetched text.
+  - Added `backend/tests/test_pipeline_text_file_stage.py`, updated `backend/tests/test_pipeline_youtube_video_stage.py`, and refreshed `AGENTS.md` with the durable text-file processing rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_text_file_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_text_file_stage.py backend/tests/test_youtube_api.py backend/tests/test_link_fetcher.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (114 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-046` as passed and added a durable note about SSRF-safe text-file fetching, `MAX_TEXT_FILE_MB` enforcement, durable extracted-text persistence, and non-thinking summary generation with heuristic fallback.
+  - Re-evaluated `EP-006`; it remains `passes: false` because generic webpage processing and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep text-file link processing on top of the shared safe fetcher, then degrade summary generation to a warning-backed fallback so successful text extraction still contributes to indexing.
+  - Gotchas encountered
+    - The global fetcher body cap is not enough by itself for this story; the text-file stage still needs its own `MAX_TEXT_FILE_MB` guard so the per-resource rule stays explicit.
+  - Useful context
+    - `sematrix.process_links` now has first-class support for `text_file` links, but ordinary `web` links still intentionally wait for the later main-text extraction story.
+---
+
+## [2026-03-15 01:44:11 +0300] - EP-006 / US-047
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement generic webpage processing with main-text extraction and link summary
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/web_pages.py` so generic web-page extraction now uses trafilatura first with readability-lxml fallback for main-text extraction.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now processes `web` snapshot links through the shared SSRF-safe fetcher, persists page-title/main-text metadata on `link_processing_results`, and falls back to a warning-backed heuristic summary when the non-thinking Ollama web summary call fails.
+  - Added `backend/app/infra/ollama.py` support for non-thinking web-page summaries, updated the existing source-guard tests that inspect the supported link-type set, added `backend/tests/test_pipeline_web_page_stage.py`, and refreshed `AGENTS.md` with the reusable webpage-processing rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/web_pages.py`
+  - `backend/requirements.txt`
+  - `backend/tests/test_pipeline_text_file_stage.py`
+  - `backend/tests/test_pipeline_web_page_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_web_page_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (118 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python - <<'PY' ... PipelineStageRunner web-link smoke test with fake fetcher/repository/Ollama client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-047` as passed and added a durable note about SSRF-safe webpage fetching, trafilatura/readability main-text extraction, durable link-result persistence, and non-thinking summary generation with heuristic fallback.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the warning-surface story `US-048` is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep generic webpage link handling on the shared safe fetcher, then let a dedicated infra extractor try trafilatura before readability-lxml so later link-stage changes do not duplicate HTML parsing logic.
+  - Gotchas encountered
+    - Existing source-guard tests that assert the supported `process_links` types need updating whenever the allowed link-type set grows, or unrelated link-stage stories can fail the full pytest suite.
+  - Useful context
+    - `sematrix.process_links` now handles `web` links alongside YouTube and text files, while single-link warning persistence still waits for the remaining `US-048` story.
+---
+
+## [2026-03-15 01:27:35 +0300] - EP-006 / US-045
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement YouTube channel metadata retrieval and fallback behavior
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/youtube.py` with `YouTubeChannelMetadata`, channel URL lookup parsing, and `fetch_channel_metadata(...)` so channel links now use YouTube Data API v3 as their primary metadata source.
+  - Updated `backend/app/infra/pipeline.py` so `sematrix.process_links` processes both `youtube_video` and `youtube_channel` snapshot links, persists channel metadata plus derived index text/summary, and falls back to SSRF-safe HTML title/description extraction only for retryable channel API failures while recording a warning.
+  - Added/updated YouTube-focused tests in `backend/tests/test_youtube_api.py`, `backend/tests/test_pipeline_youtube_video_stage.py`, and `backend/tests/test_pipeline_youtube_channel_stage.py`, and preserved the reusable fallback rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/youtube.py`
+  - `backend/tests/test_pipeline_youtube_channel_stage.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `backend/tests/test_youtube_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_youtube_api.py backend/tests/test_pipeline_youtube_video_stage.py backend/tests/test_pipeline_youtube_channel_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (110 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-045` as passed and added a durable note about channel lookup support, channel metadata persistence, and retryable-failure fallback through the shared safe fetcher.
+  - Re-evaluated `EP-006`; it remains `passes: false` because text-file/webpage processing and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - For `youtube_channel` links, keep the YouTube Data API as the default path and only downgrade to SSRF-safe web metadata fallback on retryable failures, preserving the API-first design while still keeping indexing alive.
+  - Gotchas encountered
+    - The fallback path should extract only lightweight HTML metadata here; full webpage main-text extraction still belongs to the later generic webpage-processing story.
+  - Useful context
+    - `sematrix.process_links` now treats both YouTube link types as first-class snapshot targets, but non-YouTube `web` and `text_file` links are still intentionally skipped until the next EP-006 stories.
+---
+
+## [2026-03-15 01:19:53 +0300] - EP-006 / US-044
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement YouTube video metadata retrieval through YouTube Data API v3
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/youtube.py` with a dedicated `YouTubeDataApiClient`, supported YouTube video-id extraction helpers, structured response parsing for `snippet`, `contentDetails`, and `statistics`, plus derived index-text and summary builders.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_links` now reloads snapshot-scoped `note_links`, processes `youtube_video` links through the YouTube client, persists the required structured metadata on `link_processing_results.metadata`, and saves derived `page_title`, `extracted_text`, and `generated_summary` fields for final indexing.
+  - Added `backend/tests/test_youtube_api.py` runtime-focused unit coverage and `backend/tests/test_pipeline_youtube_video_stage.py` source guards, and updated `AGENTS.md` with the durable YouTube-client placement/persistence rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/infra/youtube.py`
+  - `backend/tests/test_pipeline_youtube_video_stage.py`
+  - `backend/tests/test_youtube_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_youtube_api.py backend/tests/test_pipeline_youtube_video_stage.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (105 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner YouTube video smoke test with fake YouTube client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-044` as passed and added a durable note about the dedicated YouTube Data API client, snapshot-scoped link-stage writes, and persistence of both structured metadata and derived indexing text.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the YouTube channel fallback, text-file/webpage processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep YouTube Data API access in one infra adapter and persist both metadata plus derived text fields on `link_processing_results`, so finalization can index official API data without special-casing YouTube later.
+  - Gotchas encountered
+    - The link stage still has to derive `extracted_text` / `generated_summary` immediately from the API payload; storing only `metadata` would leave finalization blind because it currently reads the durable text fields, not raw JSON blobs.
+  - Useful context
+    - `sematrix.process_links` currently processes only `youtube_video` links and explicitly skips the other link types until the later channel/web/text stories extend the same snapshot-scoped stage.
+---
+
+## [2026-03-15 01:03:10 +0300] - EP-006 / US-042
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement link extraction and classification from note content
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/domain/note_content.py` so Save-time parsing now normalizes extracted `http/https` URLs more aggressively for per-note deduplication, including sorted query params plus stripped fragments/default ports.
+  - Expanded link classification to cover the required `youtube_video`, `youtube_channel`, `text_file`, `web`, and `other` values from note content before `note_links` synchronization runs.
+  - Added `backend/tests/test_note_content.py` with unit coverage for text-node URLs, Tiptap link marks, duplicate normalized URLs, required link-type classification, and invalid `assetId` rejection.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/note_content.py`
+  - `backend/tests/test_note_content.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_content.py` ✅
+  - `python -m pytest` ✅ (94 passed)
+- PRD updates made
+  - Marked `US-042` as passed and added a durable note about Save-time extraction from both plain text and link marks, normalized-url deduplication, and required link-type classification.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the SSRF-safe fetcher, YouTube metadata, webpage/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Normalize extracted note URLs before syncing `note_links`, or the same user-entered link can survive twice when it appears once as plain text and once as a link mark with reordered query params.
+  - Gotchas encountered
+    - The `link_type` enum includes `other`, so extension-based binary/document links should not silently fall through to `web` when they are clearly non-page resources.
+  - Useful context
+    - `parse_note_content(...)` remains the single Save-time source for flattened text, `assetId` extraction, and note-link extraction/classification, so later link-processing stages can trust the snapshot rows created from `note_links`.
+---
+
+## [2026-03-15 01:09:48 +0300] - EP-006 / US-043
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement an SSRF-safe link fetcher with scheme, DNS, redirect, port, size, and timeout enforcement
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/link_fetcher.py` with a reusable `SafeLinkFetcher` that blocks non-`http/https` schemes and non-80/443 ports, strips fragments, resolves DNS before each request, rejects localhost/private/loopback/link-local/non-global IPv4 and IPv6 targets, and disables automatic redirects so every hop is revalidated explicitly.
+  - Implemented streamed response reading with `Content-Length` prechecks, `MAX_LINK_RESPONSE_MB` enforcement during body reads, and per-request timeout propagation for both initial requests and redirects.
+  - Added `backend/tests/test_link_fetcher.py` with source guards plus runtime unit coverage for invalid scheme/port rejection, non-public DNS rejection before network access, redirect revalidation, timeout forwarding, and body-size enforcement.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/link_fetcher.py`
+  - `backend/tests/test_link_fetcher.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_link_fetcher.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (99 passed)
+- PRD updates made
+  - Marked `US-043` as passed and added a durable note about the shared no-redirect SSRF-safe fetcher, per-hop DNS/IP validation, and streamed size/timeout enforcement.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the YouTube metadata, text-file/webpage processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep SSRF-safe link fetching in one infra adapter so every later YouTube/web/text link path reuses the same per-hop scheme/port/DNS/size/timeout policy.
+  - Gotchas encountered
+    - Resolver injection in tests still needs the fetcher to validate the returned IPs, or a fake resolver can accidentally bypass the non-public-address guard.
+  - Useful context
+    - `SafeLinkFetcher` currently returns status, final URL, content type, body bytes, and redirect count, which is enough for later link-stage processors to branch on content type without reimplementing the safety envelope.
+---
+
+## [2026-03-15 00:58:16 +0300] - EP-006 / US-041
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement the process_image_caption stage for all snapshot assets
+Thread: CLI run
+- What was implemented
+  - Extended `backend/app/infra/ollama.py` with a non-thinking image-caption request that sends snapshot image bytes to the configured local vision model and returns plain-text 1-3 sentence captions.
+  - Updated `backend/app/infra/pipeline.py` so `sematrix.process_image_caption` reloads snapshot-scoped assets, resolves stored asset file paths, persists `caption_text` plus `caption_status` into `asset_processing_results`, and preserves OCR warnings/results while replacing only image-caption stage data.
+  - Added `backend/tests/test_pipeline_image_caption_stage.py` source guards and smoke-tested the stage against scratch PostgreSQL with a fake Ollama client that verifies durable caption persistence plus non-critical warning downgrade behavior.
+- Files changed
+  - `backend/app/api/dependencies.py`
+  - `backend/app/infra/ollama.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_image_caption_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (84 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner image-caption smoke test with fake Ollama client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-041` as passed and added a durable note about snapshot-scoped asset loading, the Ollama vision caption client, durable `asset_processing_results` writes, and per-asset warning downgrade behavior.
+  - Re-evaluated `EP-006`; it remains `passes: false` because link classification/fetching, YouTube metadata, webpage/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep image caption generation in the shared Ollama infra adapter and let the caption stage update only `caption_*` fields plus stage-specific warnings on `asset_processing_results`.
+  - Gotchas encountered
+    - The caption stage must preserve existing OCR warnings/results on the same `asset_processing_results` row; otherwise reruns can accidentally erase sibling stage data.
+  - Useful context
+    - `process_image_caption` now returns only stage metadata plus counts while the full captions stay in PostgreSQL, preserving the small-Celery-payload rule.
+---
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
@@ -70,6 +351,42 @@ Thread: CLI run
     - Warning-only errbacks still need to re-enter `finalize_pipeline`; otherwise a failed non-critical stage can leave the note stuck in `Processing` even though the base index is still buildable.
   - Useful context
     - Ready notes can now persist warning metadata straight from `processing_warnings`, so the later OCR/link/caption stories only need to populate per-run warning payloads or explicit errback metadata for the UI to surface them.
+---
+
+## [2026-03-15 00:49:50 +0300] - EP-006 / US-040
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement the process_ocr stage for all snapshot assets
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/ocr.py` with a dedicated PaddleOCR adapter so OCR stays in the infra layer and can be swapped with fakes in tests.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_ocr` reloads snapshot-scoped asset records, resolves file paths from stored asset metadata, persists `ocr_text` plus `ocr_status` into `asset_processing_results`, and keeps per-asset OCR failures as warnings instead of aborting the stage.
+  - Added `backend/tests/test_pipeline_ocr_stage.py` source guards, refreshed `AGENTS.md`, and smoke-tested the stage against scratch PostgreSQL with a fake OCR client that verifies durable OCR-result persistence.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ocr.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_ocr_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest backend/tests/test_pipeline_ocr_stage.py` ✅
+  - `python -m pytest` ✅ (81 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner OCR smoke test with fake OCR client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-040` as passed and added a durable note about snapshot-scoped asset loading, the dedicated OCR adapter, durable `asset_processing_results` writes, and per-asset warning downgrade behavior.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the caption, link-classification, fetcher, YouTube, web/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep OCR calls in a dedicated infra adapter and let each image stage update only its owned columns plus warnings on `asset_processing_results` so OCR/caption retries do not clobber each other.
+  - Gotchas encountered
+    - Stage-level success still needs per-asset durable warning writes; otherwise finalization cannot surface OCR failures on Ready notes when later assets succeed.
+  - Useful context
+    - `process_ocr` now returns only stage metadata plus counts while the full OCR text stays in PostgreSQL, preserving the small-Celery-payload rule.
 ---
 
 ## [2026-03-14 21:54:21 +0300] - EP-005 / US-039

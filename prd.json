@@ -650,8 +650,8 @@
             "OCR failure for one asset does not abort processing of other assets"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "OCR is explicitly required for every image and its output participates in both lexical and semantic search through search_text."
+          "passes": true,
+          "notes": "OCR is explicitly required for every image and its output participates in both lexical and semantic search through search_text. `sematrix.process_ocr` now reloads only snapshot-scoped assets, resolves each asset file path through `app.infra.assets`, runs OCR through the dedicated `app.infra.ocr` adapter, persists full `ocr_text` plus `ocr_status` on `asset_processing_results`, and downgrades single-asset OCR failures into per-asset warnings without aborting the rest of the stage."
         },
         {
           "id": "US-041",
@@ -664,8 +664,8 @@
             "Caption failure for one asset becomes a warning and does not abort the whole pipeline"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes qwen3.5:9b as the local vision model set and requires image captions to contribute to search."
+          "passes": true,
+          "notes": "The spec fixes qwen3.5:9b as the local vision model set and requires image captions to contribute to search. `sematrix.process_image_caption` now reloads only snapshot-scoped assets, resolves each asset file path through `app.infra.assets`, generates a non-thinking image caption through the Ollama vision client, persists `caption_text` plus `caption_status` on `asset_processing_results`, and downgrades single-asset caption failures into per-asset warnings without aborting the rest of the stage."
         },
         {
           "id": "US-042",
@@ -678,8 +678,8 @@
             "Per-note duplicate normalized URLs can be avoided or collapsed according to the schema rule"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Link extraction happens before the pipeline starts because note_links is part of the snapshot. User-entered links may exist as plain text or as link marks."
+          "passes": true,
+          "notes": "Link extraction happens before the pipeline starts because note_links is part of the snapshot. User-entered links may exist as plain text or as link marks. `app.domain.note_content` now extracts `http/https` links from both text nodes and Tiptap link marks during Save, normalizes them by lowercasing scheme/host, removing fragments/default ports, and sorting query params for per-note deduplication, and classifies the saved links into the required `youtube_video`, `youtube_channel`, `text_file`, `web`, and `other` types before `note_links` sync runs."
         },
         {
           "id": "US-043",
@@ -694,8 +694,8 @@
             "Connect/read timeout follows LINK_FETCH_TIMEOUT_SEC"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This is a hard security requirement. The spec explicitly forbids localhost/private-range access even through redirects."
+          "passes": true,
+          "notes": "This is a hard security requirement. The spec explicitly forbids localhost/private-range access even through redirects. Added `app.infra.link_fetcher.SafeLinkFetcher`, which uses a no-redirect opener, validates only `http/https` on ports 80/443, resolves and rejects non-public IPv4/IPv6 targets before each hop, revalidates every redirect, streams responses under `MAX_LINK_RESPONSE_MB`, and applies `LINK_FETCH_TIMEOUT_SEC` to each request."
         },
         {
           "id": "US-044",
@@ -707,8 +707,8 @@
             "Structured video metadata is available for final note indexing and link summary generation"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires YouTube Data API v3 and expanded metadata, not just title plus author."
+          "passes": true,
+          "notes": "The spec explicitly requires YouTube Data API v3 and expanded metadata, not just title plus author. Added `app.infra.youtube.YouTubeDataApiClient` plus a YouTube-video branch in `sematrix.process_links` that extracts supported video IDs from saved URLs, fetches `videos?part=snippet,contentDetails,statistics`, persists the structured metadata on `link_processing_results.metadata`, and derives indexable text plus a summary from the API payload so finalization can consume YouTube data without scraping HTML."
         },
         {
           "id": "US-045",
@@ -720,8 +720,8 @@
             "If the API is temporarily unavailable, generic web processing may be used as fallback and does not redefine the main design"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The spec allows fallback to ordinary web handling only as a backup scenario for temporary API unavailability."
+          "passes": true,
+          "notes": "The YouTube Data API remains the primary metadata source. Added channel URL lookup support in `app.infra.youtube.YouTubeDataApiClient` for `/channel/...`, `/@handle`, and `/user/...` URLs, persisted structured channel metadata plus derived index text/summary in `sematrix.process_links`, and used the shared SSRF-safe fetcher only as a warning-backed HTML metadata fallback for retryable API failures."
         },
         {
           "id": "US-046",
@@ -734,8 +734,8 @@
             "If an LLM is used to create the summary, qwen3.5:9b runs in non-thinking mode"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The spec allows heuristic or LLM summary for text files, but the output must be meaningful text for search."
+          "passes": true,
+          "notes": "The spec allows heuristic or LLM summary for text files, but the output must be meaningful text for search. `sematrix.process_links` now processes `text_file` snapshot links through the shared SSRF-safe fetcher, enforces `MAX_TEXT_FILE_MB`, persists the full decoded text plus source metadata on `link_processing_results`, and generates a non-thinking Ollama summary with a warning-backed heuristic fallback when summary generation fails."
         },
         {
           "id": "US-047",
@@ -748,8 +748,8 @@
             "If the summary is LLM-generated, qwen3.5:9b runs in non-thinking mode"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The stack section explicitly fixes trafilatura/readability-lxml for web-page main-text extraction."
+          "passes": true,
+          "notes": "The stack section explicitly fixes trafilatura/readability-lxml for web-page main-text extraction. `sematrix.process_links` now processes `web` snapshot links through the shared SSRF-safe fetcher, extracts page title plus main text via a dedicated `app.infra.web_pages` helper that tries trafilatura before readability-lxml, persists the extracted text and source metadata on `link_processing_results`, and generates a non-thinking Ollama summary with a warning-backed heuristic fallback when summary generation fails."
         },
         {
           "id": "US-048",
@@ -761,13 +761,13 @@
             "Single-link and single-image failures can still lead to final status Ready when the base index succeeds"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The recommended warning payload shape is explicitly fixed in the architecture section."
+          "passes": true,
+          "notes": "The recommended warning payload shape is explicitly fixed in the architecture section. Per-object OCR, image-caption, and link-stage warnings now persist immediately onto `notes.processing_warnings` as well as the per-run result rows, so polled note detail can surface structured `stage`/`target`/`code`/`message`/`retryable` warnings before finalization while Ready-state finalization still deduplicates against durable stage results."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic."
+      "passes": true,
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic. OCR, image-caption, save-time note-link extraction/classification, the shared SSRF-safe fetcher, YouTube video/channel metadata retrieval through the official Data API, text-file link processing, generic webpage processing, and immediate note-level mirroring of per-object non-critical warnings are now all in place, so the epic acceptance criteria are satisfied."
     },
     {
       "id": "EP-007",

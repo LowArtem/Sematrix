@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
@@ -16,11 +18,13 @@ class OllamaClient:
         base_url: str,
         llm_model: str,
         embed_model: str,
+        vision_model: str,
         timeout_sec: int = 60,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._llm_model = llm_model
         self._embed_model = embed_model
+        self._vision_model = vision_model
         self._timeout_sec = timeout_sec
 
     def generate_summary(self, *, search_text: str) -> str:
@@ -59,6 +63,36 @@ class OllamaClient:
             raise OllamaClientError("Ollama generate response did not include text")
         return response_text.strip()
 
+    def generate_text_file_summary(self, *, source_name: str, content_text: str) -> str:
+        prompt = (
+            "/no_think\n"
+            "Write a short plain-text summary for a downloaded text file. "
+            "Return only 1-2 concise sentences with no bullets or labels.\n\n"
+            f"Source: {source_name or '(unknown)'}\n"
+            "Content:\n"
+            f"{content_text}"
+        )
+        payload = self._generate_text(prompt=prompt)
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
+    def generate_web_page_summary(self, *, page_title: str, page_text: str) -> str:
+        prompt = (
+            "/no_think\n"
+            "Write a short plain-text summary for a fetched web page. "
+            "Return only 1-2 concise sentences with no bullets or labels.\n\n"
+            f"Title: {page_title or '(unknown)'}\n"
+            "Extracted text:\n"
+            f"{page_text}"
+        )
+        payload = self._generate_text(prompt=prompt)
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
     def generate_title(self, *, content_text_flat: str, tag_names: list[str]) -> str:
         tags_block = ", ".join(tag_names) if tag_names else "none"
         prompt = (
@@ -73,6 +107,30 @@ class OllamaClient:
         response_text = payload.get("response")
         if not isinstance(response_text, str):
             raise OllamaClientError("Ollama generate response did not include text")
+        return response_text.strip()
+
+    def generate_image_caption(self, *, image_path: Path) -> str:
+        if not image_path.exists():
+            raise OllamaClientError(f"Image caption asset file not found: {image_path}")
+
+        encoded_image = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        payload = self._post_json(
+            "/api/generate",
+            {
+                "model": self._vision_model,
+                "prompt": (
+                    "/no_think\n"
+                    "Describe this note image in 1-3 meaningful plain-text sentences. "
+                    "Return only the caption text, with no bullets or labels."
+                ),
+                "images": [encoded_image],
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+        )
+        response_text = payload.get("response")
+        if not isinstance(response_text, str):
+            raise OllamaClientError("Ollama image caption response did not include text")
         return response_text.strip()
 
     def embed_text(self, *, text: str) -> list[float]:

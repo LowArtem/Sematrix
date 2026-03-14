@@ -68,6 +68,13 @@ Backend foundation convention:
 - Keep request-scoped SQLAlchemy sessions in `backend/app/api/dependencies.py` and build repository-backed domain services from those dependencies instead of opening database sessions inside route handlers.
 - Keep file-backed asset persistence in `backend/app/infra/assets.py`, and remove any just-written file on database rollback so `assets` / `note_assets` rows cannot drift from the filesystem.
 - Keep local Ollama HTTP calls inside `backend/app/infra` adapters and inject those clients into note-save or pipeline services so tests can swap in fakes without moving title/summary/embedding logic into route handlers or worker tasks.
+- Keep OCR calls inside `backend/app/infra/ocr.py`, and have OCR/caption stages update only their own fields plus stage-specific warnings on shared `asset_processing_results` rows so retries do not clobber sibling stage outputs.
+- Keep SSRF-safe link fetching inside `backend/app/infra/link_fetcher.py`, and make every hop revalidate scheme, port, DNS-resolved IPs, redirect count, size limit, and timeout before any link-specific processing consumes the response.
+- Keep YouTube Data API calls inside `backend/app/infra/youtube.py`, and have YouTube link stages persist both structured metadata and derived text/summary fields on `link_processing_results` so final indexing can consume the API result without scraping HTML in worker tasks.
+- For `youtube_channel` links, keep the YouTube Data API as the primary path and only fall back to SSRF-safe web fetching on retryable API failures, storing the fallback as a warning-backed exception path instead of redefining the main design.
+- Keep text-file link processing in `backend/app/infra/pipeline.py` on top of the shared SSRF-safe fetcher: enforce `MAX_TEXT_FILE_MB`, persist full extracted text on `link_processing_results`, and treat summary-generation failures as warning-backed fallbacks instead of discarding usable fetched text.
+- Keep generic webpage link processing on top of the shared SSRF-safe fetcher, extract main text through `backend/app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and downgrade summary-generation failures to warning-backed heuristic summaries so usable page text still reaches indexing.
+- Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage persists its durable per-run result, so polled note detail can surface warnings before finalization while Ready-state finalization still deduplicates against the stage tables.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.
@@ -169,6 +176,7 @@ Do not move business logic into route handlers or UI code.
 When handling links:
 
 - Only `http` / `https` are allowed.
+- Normalize saved note URLs before snapshotting them by removing fragments/default ports, lowercasing scheme + host, and sorting query params so duplicate links inside one note collapse to one `normalized_url`.
 - Only public resources are allowed.
 - Requests to localhost, loopback, private, link-local, or otherwise internal IP ranges must be blocked.
 - DNS resolution and redirect validation must be part of the safety model.
