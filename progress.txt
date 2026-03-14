@@ -19,6 +19,39 @@
 - Keep FastAPI error shaping centralized in `app/api/errors.py`; register global handlers from app bootstrap so 404/409/413/415/422/500 responses and validation payloads stay in one `ApiErrorDto` format.
 - Keep structured logging context centralized in `app/core/logging.py`; bind API `X-Request-Id` in middleware and Celery `task_id` in worker bootstrap so route/task code can stay focused on domain work.
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
+- Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
+
+## [2026-03-14 19:30:29 +0300] - EP-004 / US-021
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement tag validation and normalization rules in the backend
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/domain/tags.py` with shared tag normalization helpers that trim and lowercase names, reject spaces and invalid characters, and deduplicate normalized values while preserving input order.
+  - Wired `backend/app/api/dto.py` so `NoteSaveRequestDto.tags` now runs through the shared backend helper before later save flows persist or reuse tag names.
+  - Added `backend/tests/test_tag_validation.py` plus a backend-container smoke check that exercises successful normalization and invalid-tag rejection through the real DTO code.
+- Files changed
+  - `backend/app/api/dto.py`
+  - `backend/app/domain/tags.py`
+  - `backend/tests/test_tag_validation.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (30 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "...NoteSaveRequestDto tag normalization smoke test..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-021` as passed and added a durable note about the shared tag helper, DTO validation wiring, and normalized-name deduplication.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, note CRUD/save/reindex, delete, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep tag validation and normalization centralized in `app/domain/tags.py` so DTO validation and note-save logic cannot drift on allowed characters or lowercase rules.
+  - Gotchas encountered
+    - Source-based tests are less brittle here if they assert durable rule strings instead of the exact single-line formatting of multi-line `raise` statements.
+  - Useful context
+    - `NoteSaveRequestDto.tags` now returns normalized unique tag names such as `['foo', 'бар']`, so later note-save persistence can treat the payload as already backend-normalized.
+---
 
 ## [2026-03-14 19:25:46 +0300] - EP-004 / US-020
 Epic: Folders, tags, assets, and note CRUD domain flows

@@ -345,8 +345,8 @@
             "Uniqueness is enforced on normalized tag name"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly says normalization happens on the backend, even if the frontend also mirrors it for UX."
+          "passes": true,
+          "notes": "The spec explicitly says normalization happens on the backend, even if the frontend also mirrors it for UX. Added a shared `app.domain.tags` normalization helper that trims and lowercases values, rejects spaces and non Latin/Cyrillic/digit/underscore characters, and deduplicates normalized names before `NoteSaveRequestDto` accepts them."
         },
         {
           "id": "US-022",

@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.domain.tags import normalize_tag_names
+
 
 class ApiErrorDto(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -140,3 +142,8 @@ class NoteSaveRequestDto(BaseModel):
     folder_id: UUID | None = None
     tags: list[str] = Field(default_factory=list)
     content_json: dict[str, Any]
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: list[str]) -> list[str]:
+        return normalize_tag_names(value)
