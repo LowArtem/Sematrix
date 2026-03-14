@@ -35,6 +35,7 @@
 - Keep the fixed Celery retry policy encoded on the worker task definitions themselves so link processing gets 3 total attempts with exponential backoff while OCR/image-caption get 2 total attempts without drifting from the spec.
 - For Draft TTL cleanup, evaluate emptiness from parsed `content_json` with the shared meaningful-content rule instead of raw `note_assets` rows alone, so abandoned pre-save uploads remain cleanup-eligible while orphaned asset files can still be removed.
 - Keep save-time title and fast-summary generation behind an injected `app/infra/ollama.py` client in `NoteService`, so meaningful saves can prefill card data and persist non-fatal generation warnings while tests swap in fakes without touching route handlers.
+- Keep OCR calls in `app/infra/ocr.py`, and have OCR/caption stages update only their own columns plus stage-specific warnings on shared `asset_processing_results` rows so reruns do not erase sibling stage outputs.
 
 ## [2026-03-14 21:30:18 +0300] - EP-005 / US-036
 Epic: Draft lifecycle, pipeline orchestration, race protection, and timing
@@ -70,6 +71,42 @@ Thread: CLI run
     - Warning-only errbacks still need to re-enter `finalize_pipeline`; otherwise a failed non-critical stage can leave the note stuck in `Processing` even though the base index is still buildable.
   - Useful context
     - Ready notes can now persist warning metadata straight from `processing_warnings`, so the later OCR/link/caption stories only need to populate per-run warning payloads or explicit errback metadata for the UI to surface them.
+---
+
+## [2026-03-15 00:49:50 +0300] - EP-006 / US-040
+Epic: Image OCR/caption and secure link processing
+Epic Branch: ralph/sematrix-mvp/ep-006-ocr-and-link-processing
+Story: Implement the process_ocr stage for all snapshot assets
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/infra/ocr.py` with a dedicated PaddleOCR adapter so OCR stays in the infra layer and can be swapped with fakes in tests.
+  - Extended `backend/app/infra/pipeline.py` so `sematrix.process_ocr` reloads snapshot-scoped asset records, resolves file paths from stored asset metadata, persists `ocr_text` plus `ocr_status` into `asset_processing_results`, and keeps per-asset OCR failures as warnings instead of aborting the stage.
+  - Added `backend/tests/test_pipeline_ocr_stage.py` source guards, refreshed `AGENTS.md`, and smoke-tested the stage against scratch PostgreSQL with a fake OCR client that verifies durable OCR-result persistence.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/ocr.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/tests/test_pipeline_ocr_stage.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest backend/tests/test_pipeline_ocr_stage.py` ✅
+  - `python -m pytest` ✅ (81 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + `pg_isready` wait + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... PipelineStageRunner OCR smoke test with fake OCR client ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-040` as passed and added a durable note about snapshot-scoped asset loading, the dedicated OCR adapter, durable `asset_processing_results` writes, and per-asset warning downgrade behavior.
+  - Re-evaluated `EP-006`; it remains `passes: false` because the caption, link-classification, fetcher, YouTube, web/text processing, and warning-surface stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep OCR calls in a dedicated infra adapter and let each image stage update only its owned columns plus warnings on `asset_processing_results` so OCR/caption retries do not clobber each other.
+  - Gotchas encountered
+    - Stage-level success still needs per-asset durable warning writes; otherwise finalization cannot surface OCR failures on Ready notes when later assets succeed.
+  - Useful context
+    - `process_ocr` now returns only stage metadata plus counts while the full OCR text stays in PostgreSQL, preserving the small-Celery-payload rule.
 ---
 
 ## [2026-03-14 21:54:21 +0300] - EP-005 / US-039

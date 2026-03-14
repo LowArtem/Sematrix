@@ -20,7 +20,9 @@ from app.domain.pipeline import (
     merge_processing_warnings,
     normalize_pipeline_stage_name,
 )
-from app.infra.models import AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
+from app.infra.assets import get_asset_path
+from app.infra.models import Asset, AssetProcessingResult, LinkProcessingResult, Note, NoteAsset, NoteLink, PipelineRun
+from app.infra.ocr import OcrClientError, PaddleOcrClient
 from app.infra.ollama import OllamaClient
 from app.workers.celery_app import celery_app
 
@@ -73,6 +75,12 @@ class AssetProcessingTextResult:
 
 
 @dataclass(frozen=True)
+class SnapshotAssetRecord:
+    asset_id: UUID
+    storage_key: str
+
+
+@dataclass(frozen=True)
 class LinkProcessingTextResult:
     url: str
     page_title: str
@@ -92,6 +100,13 @@ class PipelineRuntimeRepository(Protocol):
     ) -> PipelineStageRuntimeState | None: ...
 
     def list_snapshot_asset_ids(self, *, note_id: UUID, snapshot_asset_ids: list[UUID]) -> list[UUID]: ...
+
+    def list_snapshot_assets(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]: ...
 
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]: ...
 
@@ -149,6 +164,18 @@ class PipelineRuntimeRepository(Protocol):
         pipeline_run_id: UUID,
         warning: dict[str, object],
     ) -> bool: ...
+
+    def store_asset_ocr_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        ocr_text: str,
+        ocr_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None: ...
 
     def fail_pipeline_run(
         self,
@@ -228,6 +255,29 @@ class SqlAlchemyPipelineRuntimeRepository:
             )
         )
         return [asset_id for asset_id in snapshot_asset_ids if asset_id in existing_asset_ids]
+
+    def list_snapshot_assets(
+        self,
+        *,
+        note_id: UUID,
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]:
+        if not snapshot_asset_ids:
+            return []
+
+        rows = self._session.execute(
+            select(Asset.id, Asset.storage_key)
+            .join(NoteAsset, NoteAsset.asset_id == Asset.id)
+            .where(
+                NoteAsset.note_id == note_id,
+                Asset.id.in_(snapshot_asset_ids),
+            )
+        ).all()
+        assets_by_id = {
+            asset_id: SnapshotAssetRecord(asset_id=asset_id, storage_key=storage_key)
+            for asset_id, storage_key in rows
+        }
+        return [assets_by_id[asset_id] for asset_id in snapshot_asset_ids if asset_id in assets_by_id]
 
     def list_snapshot_link_ids(self, *, note_id: UUID, snapshot_link_ids: list[UUID]) -> list[UUID]:
         if not snapshot_link_ids:
@@ -451,6 +501,44 @@ class SqlAlchemyPipelineRuntimeRepository:
         self._session.commit()
         return True
 
+    def store_asset_ocr_result(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        asset_id: UUID,
+        ocr_text: str,
+        ocr_status: str,
+        warnings: list[dict[str, object]],
+    ) -> None:
+        result = self._session.scalar(
+            select(AssetProcessingResult).where(
+                AssetProcessingResult.note_id == note_id,
+                AssetProcessingResult.index_version == index_version,
+                AssetProcessingResult.pipeline_run_id == pipeline_run_id,
+                AssetProcessingResult.asset_id == asset_id,
+            )
+        )
+        if result is None:
+            result = AssetProcessingResult(
+                pipeline_run_id=pipeline_run_id,
+                note_id=note_id,
+                asset_id=asset_id,
+                index_version=index_version,
+            )
+
+        preserved_warnings = [
+            warning
+            for warning in self._normalize_processing_warnings(result.warnings)
+            if str(warning.get("stage")) != "ocr"
+        ]
+        result.ocr_text = ocr_text
+        result.ocr_status = ocr_status
+        result.warnings = merge_processing_warnings(preserved_warnings, warnings)
+        self._session.add(result)
+        self._session.commit()
+
     def fail_pipeline_run(
         self,
         *,
@@ -648,8 +736,14 @@ class CeleryPipelineOrchestrator:
 
 
 class PipelineStageRunner:
-    def __init__(self, *, runtime_repository: PipelineRuntimeRepository) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_repository: PipelineRuntimeRepository,
+        ocr_client: PaddleOcrClient,
+    ) -> None:
         self._runtime_repository = runtime_repository
+        self._ocr_client = ocr_client
 
     def process_links(
         self,
@@ -680,18 +774,107 @@ class PipelineStageRunner:
         pipeline_run_id: UUID,
         request_id: str | None,
     ) -> dict[str, object]:
-        return self._run_stage(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
             stage_name="process_ocr",
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
-            snapshot_target_ids_getter=lambda state: state.snapshot_asset_ids,
-            existing_target_ids_loader=lambda snapshot_target_ids: self._runtime_repository.list_snapshot_asset_ids(
-                note_id=note_id,
-                snapshot_asset_ids=snapshot_target_ids,
-            ),
         )
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
+                stage_name="process_ocr",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        assets = self._runtime_repository.list_snapshot_assets(
+            note_id=note_id,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        filtered_assets = self._filter_snapshot_assets(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
+            assets=assets,
+            snapshot_asset_ids=runtime_state.snapshot_asset_ids,
+        )
+        assets_by_id = {asset.asset_id: asset for asset in filtered_assets}
+
+        processed_count = 0
+        skipped_count = 0
+        warning_count = 0
+        for asset_id in runtime_state.snapshot_asset_ids:
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                skipped_count += 1
+                self._log_target_skip(
+                    stage_name="process_ocr",
+                    note_id=note_id,
+                    index_version=index_version,
+                    pipeline_run_id=pipeline_run_id,
+                    request_id=request_id,
+                    target_id=asset_id,
+                    skipped_reason="missing_target",
+                )
+                continue
+
+            processed_count += 1
+            image_path = get_asset_path(asset.storage_key)
+            warnings: list[dict[str, object]] = []
+            try:
+                ocr_text = self._ocr_client.extract_text(image_path=image_path)
+                ocr_status = "done"
+            except OcrClientError as exc:
+                ocr_text = ""
+                ocr_status = "error"
+                warnings = [
+                    build_processing_warning(
+                        stage="ocr",
+                        target=str(asset.asset_id),
+                        code="ocr_failed",
+                        message=str(exc),
+                        retryable=False,
+                    )
+                ]
+                warning_count += 1
+
+            self._runtime_repository.store_asset_ocr_result(
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                asset_id=asset.asset_id,
+                ocr_text=ocr_text,
+                ocr_status=ocr_status,
+                warnings=warnings,
+            )
+
+        logger.info(
+            "pipeline_stage_completed",
+            extra={
+                "event": "pipeline_stage_completed",
+                "stage_name": "process_ocr",
+                "note_id": str(note_id),
+                "index_version": index_version,
+                "request_id": request_id,
+                "pipeline_run_id": str(pipeline_run_id),
+                "processed_count": processed_count,
+                "skipped_count": skipped_count,
+                "warnings_count": warning_count,
+            },
+        )
+        return {
+            "stage_name": "process_ocr",
+            "status": "done",
+            "processed_count": processed_count,
+            "skipped_count": skipped_count,
+            "warnings_count": warning_count,
+            "skipped": False,
+        }
 
     def process_image_caption(
         self,
@@ -725,53 +908,21 @@ class PipelineStageRunner:
         snapshot_target_ids_getter: Callable[[PipelineStageRuntimeState], list[UUID]],
         existing_target_ids_loader: Callable[[list[UUID]], list[UUID]],
     ) -> dict[str, object]:
-        runtime_state = self._runtime_repository.get_stage_runtime_state(
+        runtime_state, skipped_result = self._get_active_stage_runtime_state(
+            stage_name=stage_name,
             note_id=note_id,
             index_version=index_version,
             pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
         )
-        if runtime_state is None:
-            return self._build_skipped_stage_result(
+        if skipped_result is not None or runtime_state is None:
+            return skipped_result or self._build_skipped_stage_result(
                 stage_name=stage_name,
                 note_id=note_id,
                 index_version=index_version,
                 pipeline_run_id=pipeline_run_id,
                 request_id=request_id,
                 skipped_reason="missing_runtime_state",
-            )
-
-        if runtime_state.current_index_version != index_version:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="stale_version",
-            )
-
-        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="snapshot_mismatch",
-            )
-
-        expected_snapshot_hash = compute_snapshot_hash(
-            asset_ids=runtime_state.snapshot_asset_ids,
-            link_ids=runtime_state.snapshot_link_ids,
-        )
-        if runtime_state.snapshot_hash != expected_snapshot_hash:
-            return self._build_skipped_stage_result(
-                stage_name=stage_name,
-                note_id=note_id,
-                index_version=index_version,
-                pipeline_run_id=pipeline_run_id,
-                request_id=request_id,
-                skipped_reason="invalid_snapshot_hash",
             )
 
         snapshot_target_ids = snapshot_target_ids_getter(runtime_state)
@@ -824,6 +975,89 @@ class PipelineStageRunner:
             "skipped_count": skipped_count,
             "skipped": False,
         }
+
+    def _get_active_stage_runtime_state(
+        self,
+        *,
+        stage_name: str,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+    ) -> tuple[PipelineStageRuntimeState | None, dict[str, object] | None]:
+        runtime_state = self._runtime_repository.get_stage_runtime_state(
+            note_id=note_id,
+            index_version=index_version,
+            pipeline_run_id=pipeline_run_id,
+        )
+        if runtime_state is None:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="missing_runtime_state",
+            )
+
+        if runtime_state.current_index_version != index_version:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="stale_version",
+            )
+
+        if runtime_state.pipeline_run_note_id != note_id or runtime_state.pipeline_run_index_version != index_version:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="snapshot_mismatch",
+            )
+
+        expected_snapshot_hash = compute_snapshot_hash(
+            asset_ids=runtime_state.snapshot_asset_ids,
+            link_ids=runtime_state.snapshot_link_ids,
+        )
+        if runtime_state.snapshot_hash != expected_snapshot_hash:
+            return None, self._build_skipped_stage_result(
+                stage_name=stage_name,
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                skipped_reason="invalid_snapshot_hash",
+            )
+
+        return runtime_state, None
+
+    def _filter_snapshot_assets(
+        self,
+        *,
+        note_id: UUID,
+        index_version: int,
+        pipeline_run_id: UUID,
+        request_id: str | None,
+        assets: list[SnapshotAssetRecord],
+        snapshot_asset_ids: list[UUID],
+    ) -> list[SnapshotAssetRecord]:
+        filtered_asset_ids = set(
+            self._filter_snapshot_target_ids(
+                stage_name="process_ocr",
+                note_id=note_id,
+                index_version=index_version,
+                pipeline_run_id=pipeline_run_id,
+                request_id=request_id,
+                candidate_target_ids=[asset.asset_id for asset in assets],
+                snapshot_target_ids=snapshot_asset_ids,
+            )
+        )
+        return [asset for asset in assets if asset.asset_id in filtered_asset_ids]
 
     def _filter_snapshot_target_ids(
         self,
@@ -1356,7 +1590,10 @@ def build_pipeline_orchestrator(*, session: Session) -> CeleryPipelineOrchestrat
 
 
 def build_pipeline_stage_runner(*, session: Session) -> PipelineStageRunner:
-    return PipelineStageRunner(runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session))
+    return PipelineStageRunner(
+        runtime_repository=SqlAlchemyPipelineRuntimeRepository(session=session),
+        ocr_client=PaddleOcrClient(),
+    )
 
 
 def build_pipeline_finalizer(*, session: Session) -> PipelineFinalizer:

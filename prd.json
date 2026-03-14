@@ -650,8 +650,8 @@
             "OCR failure for one asset does not abort processing of other assets"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "OCR is explicitly required for every image and its output participates in both lexical and semantic search through search_text."
+          "passes": true,
+          "notes": "OCR is explicitly required for every image and its output participates in both lexical and semantic search through search_text. `sematrix.process_ocr` now reloads only snapshot-scoped assets, resolves each asset file path through `app.infra.assets`, runs OCR through the dedicated `app.infra.ocr` adapter, persists full `ocr_text` plus `ocr_status` on `asset_processing_results`, and downgrades single-asset OCR failures into per-asset warnings without aborting the rest of the stage."
         },
         {
           "id": "US-041",
