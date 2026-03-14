@@ -102,6 +102,12 @@ class Note(Base):
 
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
     assets: Mapped[list["Asset"]] = relationship(secondary="note_assets", back_populates="notes")
+    asset_processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
+        back_populates="note"
+    )
+    link_processing_results: Mapped[list["LinkProcessingResult"]] = relationship(
+        back_populates="note"
+    )
     pipeline_runs: Mapped[list["PipelineRun"]] = relationship(back_populates="note")
     tags: Mapped[list["Tag"]] = relationship(secondary="note_tags", back_populates="notes")
 
@@ -137,6 +143,9 @@ class Asset(Base):
     )
 
     notes: Mapped[list[Note]] = relationship(secondary="note_assets", back_populates="assets")
+    processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
+        back_populates="asset"
+    )
 
 
 class NoteTag(Base):
@@ -216,4 +225,112 @@ class PipelineRun(Base):
     )
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    asset_processing_results: Mapped[list["AssetProcessingResult"]] = relationship(
+        back_populates="pipeline_run"
+    )
+    link_processing_results: Mapped[list["LinkProcessingResult"]] = relationship(
+        back_populates="pipeline_run"
+    )
     note: Mapped[Note] = relationship(back_populates="pipeline_runs")
+
+
+class AssetProcessingResult(Base):
+    __tablename__ = "asset_processing_results"
+    __table_args__ = (UniqueConstraint("pipeline_run_id", "asset_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pipeline_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pipeline_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    index_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    ocr_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    caption_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    ocr_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'pending'"))
+    caption_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    warnings: Mapped[list[object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    asset: Mapped[Asset] = relationship(back_populates="processing_results")
+    note: Mapped[Note] = relationship(back_populates="asset_processing_results")
+    pipeline_run: Mapped[PipelineRun] = relationship(back_populates="asset_processing_results")
+
+
+class LinkProcessingResult(Base):
+    __tablename__ = "link_processing_results"
+    __table_args__ = (UniqueConstraint("pipeline_run_id", "link_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pipeline_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pipeline_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    link_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    index_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_title: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    generated_summary: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    fetch_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    warnings: Mapped[list[object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    note: Mapped[Note] = relationship(back_populates="link_processing_results")
+    pipeline_run: Mapped[PipelineRun] = relationship(back_populates="link_processing_results")

@@ -244,8 +244,136 @@ def upgrade() -> None:
         sa.UniqueConstraint("note_id", "index_version", name=op.f("uq_pipeline_runs_note_id_index_version")),
     )
 
+    op.create_table(
+        "asset_processing_results",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("pipeline_run_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("asset_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("index_version", sa.Integer(), nullable=False),
+        sa.Column("ocr_text", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("caption_text", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column(
+            "ocr_status",
+            sa.String(length=32),
+            server_default=sa.text("'pending'"),
+            nullable=False,
+        ),
+        sa.Column(
+            "caption_status",
+            sa.String(length=32),
+            server_default=sa.text("'pending'"),
+            nullable=False,
+        ),
+        sa.Column(
+            "warnings",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["asset_id"],
+            ["assets.id"],
+            name=op.f("fk_asset_processing_results_asset_id_assets"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["note_id"],
+            ["notes.id"],
+            name=op.f("fk_asset_processing_results_note_id_notes"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["pipeline_run_id"],
+            ["pipeline_runs.id"],
+            name=op.f("fk_asset_processing_results_pipeline_run_id_pipeline_runs"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_asset_processing_results")),
+        sa.UniqueConstraint(
+            "pipeline_run_id",
+            "asset_id",
+            name=op.f("uq_asset_processing_results_pipeline_run_id_asset_id"),
+        ),
+    )
+
+    op.create_table(
+        "link_processing_results",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("pipeline_run_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("link_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("index_version", sa.Integer(), nullable=False),
+        sa.Column("page_title", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("content_type", sa.String(length=255), nullable=True),
+        sa.Column("extracted_text", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("generated_summary", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column(
+            "metadata",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column(
+            "fetch_status",
+            sa.String(length=32),
+            server_default=sa.text("'pending'"),
+            nullable=False,
+        ),
+        sa.Column(
+            "warnings",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["note_id"],
+            ["notes.id"],
+            name=op.f("fk_link_processing_results_note_id_notes"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["pipeline_run_id"],
+            ["pipeline_runs.id"],
+            name=op.f("fk_link_processing_results_pipeline_run_id_pipeline_runs"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_link_processing_results")),
+        sa.UniqueConstraint(
+            "pipeline_run_id",
+            "link_id",
+            name=op.f("uq_link_processing_results_pipeline_run_id_link_id"),
+        ),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("link_processing_results")
+    op.drop_table("asset_processing_results")
     op.drop_table("pipeline_runs")
     op.drop_table("note_assets")
     op.drop_table("note_tags")

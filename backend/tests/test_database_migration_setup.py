@@ -37,7 +37,9 @@ def test_core_schema_models_are_registered() -> None:
     assert "class Folder(Base):" in models_module
     assert "class Note(Base):" in models_module
     assert "class Asset(Base):" in models_module
+    assert "class AssetProcessingResult(Base):" in models_module
     assert "class Tag(Base):" in models_module
+    assert "class LinkProcessingResult(Base):" in models_module
     assert "class NoteAsset(Base):" in models_module
     assert "class NoteTag(Base):" in models_module
     assert "class PipelineRun(Base):" in models_module
@@ -48,6 +50,12 @@ def test_core_schema_models_are_registered() -> None:
     assert "to_tsvector('english', coalesce(search_text, ''))" in models_module
     assert 'snapshot_asset_ids: Mapped[list[uuid.UUID]] = mapped_column(' in models_module
     assert 'stage_durations_ms: Mapped[dict[str, int]] = mapped_column(' in models_module
+    assert '__tablename__ = "asset_processing_results"' in models_module
+    assert '__tablename__ = "link_processing_results"' in models_module
+    assert 'UniqueConstraint("pipeline_run_id", "asset_id")' in models_module
+    assert 'UniqueConstraint("pipeline_run_id", "link_id")' in models_module
+    assert 'ocr_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("\'pending\'"))' in models_module
+    assert 'generated_summary: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("\'\'"))' in models_module
 
 
 def test_initial_revision_creates_core_schema() -> None:
@@ -63,8 +71,12 @@ def test_initial_revision_creates_core_schema() -> None:
     assert 'op.create_table(\n        "note_tags"' in revision_module
     assert 'op.create_table(\n        "note_assets"' in revision_module
     assert 'op.create_table(\n        "pipeline_runs"' in revision_module
+    assert 'op.create_table(\n        "asset_processing_results"' in revision_module
+    assert 'op.create_table(\n        "link_processing_results"' in revision_module
     assert 'sa.UniqueConstraint("storage_key", name=op.f("uq_assets_storage_key"))' in revision_module
     assert 'sa.UniqueConstraint("note_id", "index_version", name=op.f("uq_pipeline_runs_note_id_index_version"))' in revision_module
+    assert 'sa.UniqueConstraint(\n            "pipeline_run_id",\n            "asset_id",' in revision_module
+    assert 'sa.UniqueConstraint(\n            "pipeline_run_id",\n            "link_id",' in revision_module
     assert 'postgresql.ARRAY(postgresql.UUID(as_uuid=True))' in revision_module
     assert 'sa.Enum("Processing", "Ready", "Error", name="pipeline_run_status")' in revision_module
     assert 'sa.Enum("Draft", "Processing", "Ready", "Error", name="note_status")' in revision_module

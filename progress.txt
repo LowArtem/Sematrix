@@ -11,6 +11,43 @@
 - When an Alembic migration manually creates a PostgreSQL enum before table creation, use `postgresql.ENUM(..., create_type=False)` on the table column to avoid duplicate `CREATE TYPE` attempts during `op.create_table(...)`.
 - Create the scratch validation database explicitly inside the Compose Postgres service before running `alembic upgrade head`, since Alembic will not create the target PostgreSQL database for you.
 - Wait for `pg_isready` inside the Compose Postgres container before scratch-database `psql` setup, because the container may report as started before PostgreSQL accepts connections.
+- In SQLAlchemy declarative models, do not use `metadata` as a Python attribute name; map the database column with an alternate attribute such as `metadata_json = mapped_column("metadata", ...)`.
+
+## [2026-03-14 18:34:58 +0300] - EP-002 / US-013
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create version-aware result tables for asset and link processing
+Thread: CLI run
+- What was implemented
+  - Added typed `AssetProcessingResult` and `LinkProcessingResult` SQLAlchemy models with durable OCR/caption/link text fields, per-stage statuses, warnings payloads, note/version tracking, and per-run uniqueness on `(pipeline_run_id, asset_id)` / `(pipeline_run_id, link_id)`.
+  - Expanded the existing Alembic head revision to create both result tables with cascade foreign keys back to `pipeline_runs` and `notes`, plus the asset foreign key needed for image-stage durability.
+  - Extended the schema guard tests so the repository now checks for the new models and migration statements alongside the earlier core-schema coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_processing_results_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_processing_results_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `asset_processing_results` and `link_processing_results` columns plus their primary/foreign-key and uniqueness constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-013` as passed and added a durable note about the new version-aware result tables, migration coverage, and the temporary UUID-only `link_id` until `note_links` exists.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note-links and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - SQLAlchemy declarative models cannot use `metadata` as an attribute name; map the DB column from an alternate Python attribute instead.
+  - Gotchas encountered
+    - The `link_processing_results` schema can safely land before `note_links` exists if `link_id` starts as a UUID column and the foreign key is added in the later note-links story.
+  - Useful context
+    - `asset_processing_results` already has the asset foreign key needed by OCR/caption stages, while `link_processing_results` is ready for later link-table integration without forcing this story to implement `note_links` early.
+---
 
 ## [2026-03-14 18:28:11 +0300] - EP-002 / US-012
 Epic: Database schema, pgvector, and migrations

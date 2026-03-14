@@ -204,8 +204,8 @@
             "The schema supports warnings, statuses, and extracted/generated text fields from the spec"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Old processing results must never overwrite or replace the current note state. Finalization reads only current-run results."
+          "passes": true,
+          "notes": "Old processing results must never overwrite or replace the current note state. Finalization reads only current-run results. Added typed `AssetProcessingResult` and `LinkProcessingResult` models plus Alembic schema for durable per-run OCR/caption/link outputs, warnings, statuses, and note/version tracking, with scratch-Postgres validation of the migrated columns and uniqueness constraints. `link_processing_results.link_id` is stored as UUID for now and can gain its foreign key when the `note_links` table is introduced."
         },
         {
           "id": "US-014",
@@ -225,7 +225,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts."
+      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts. `US-013` is now complete with durable asset/link processing result tables, but the epic still remains open because `note_links` and the remaining index-specific schema work are not finished yet."
     },
     {
       "id": "EP-003",
