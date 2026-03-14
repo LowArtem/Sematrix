@@ -30,6 +30,7 @@ If there is a conflict:
 - A user story is the atomic executable work item.
 - An epic is the planning, prioritization, and branch container for its nested stories.
 - The PRD top-level `branchName` is the shared project/base integration branch.
+- The PRD top-level `branchName` must not be a Git ref prefix of epic branch names (for example, avoid `foo` with epic branches like `foo/bar`), or Git cannot create both branches locally.
 - In nested PRD mode, each epic must have its own `branchName`.
 - All work for stories inside one epic must happen on that epic branch.
 - Do not mix unfinished work from multiple epics on one branch.

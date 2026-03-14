@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
+- Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
 - For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered `docker compose config` output in tests.
 - For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
@@ -7,6 +8,269 @@
 - For automatic Ollama model availability, use a one-shot `ollama-init` service that shares `./data/ollama`, waits for the API, and gates model-dependent services with `condition: service_completed_successfully`.
 - When Ollama model compatibility outruns usable Docker tags, pin the official `ollama/ollama` image by digest in Compose so `ollama` and `ollama-init` stay reproducible while still matching the required model set.
 - Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
+- For database-foundation stories, verify `alembic upgrade head` against a freshly created scratch PostgreSQL database through `docker compose run --rm --no-deps backend ...` instead of trusting file-only migration scaffolding.
+- When an Alembic migration manually creates a PostgreSQL enum before table creation, use `postgresql.ENUM(..., create_type=False)` on the table column to avoid duplicate `CREATE TYPE` attempts during `op.create_table(...)`.
+- Create the scratch validation database explicitly inside the Compose Postgres service before running `alembic upgrade head`, since Alembic will not create the target PostgreSQL database for you.
+- Wait for `pg_isready` inside the Compose Postgres container before scratch-database `psql` setup, because the container may report as started before PostgreSQL accepts connections.
+- In SQLAlchemy declarative models, do not use `metadata` as a Python attribute name; map the database column with an alternate attribute such as `metadata_json = mapped_column("metadata", ...)`.
+- For schema/index stories, validate the final PostgreSQL indexes from `pg_indexes` against a scratch migrated database instead of assuming SQLAlchemy/Alembic declarations rendered exactly as intended.
+
+## [2026-03-14 18:39:23 +0300] - EP-002 / US-014
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Implement all required indices and generated search columns
+Thread: CLI run
+- What was implemented
+  - Added the required SQLAlchemy index declarations for note listing on `(folder_id, updated_at, id)`, the GIN-backed `notes.search_tsv`, reverse lookup support on `note_tags` and `note_assets`, and current-version lookup support on both processing-result tables.
+  - Expanded the existing Alembic head revision to create and drop those six required indexes while preserving the exact RU+EN STORED `search_tsv` expression already fixed in the schema.
+  - Extended the schema guard tests so the repository now checks for the new ORM and migration index declarations alongside the earlier generated-column coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... pg_isready` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_indexes_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_indexes_check backend alembic upgrade head` ✅
+  - PostgreSQL `pg_indexes` inspection for the six required listing/search/relation/result indexes ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-014` as passed and added a durable note about the required SQLAlchemy/Alembic indexes plus scratch-Postgres validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the `note_links` schema story is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Scratch-database validation for schema/index work should inspect `pg_indexes` directly when acceptance criteria name exact PostgreSQL indexes.
+  - Gotchas encountered
+    - The join-table composite primary keys already cover `note_id`-leading lookups, so the extra relation-table indexes are most useful on the reverse `(tag_id, note_id)` and `(asset_id, note_id)` access paths.
+  - Useful context
+    - The exact RU+EN generated `search_tsv` expression was already in place from the earlier notes schema work, so this story only had to harden the index layer around that fixed search storage contract.
+---
+
+## [2026-03-14 18:45:17 +0300] - EP-002 / US-011
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create note_links for per-note extracted links
+Thread: CLI run
+- What was implemented
+  - Added a typed `NoteLink` SQLAlchemy model with the fixed per-note fields, `(note_id, normalized_url)` deduplication, and the required `youtube_video/youtube_channel/web/text_file/other` link-type enum.
+  - Expanded the existing Alembic head revision to create `note_links`, register/drop the `link_type` enum, and upgrade `link_processing_results.link_id` from a plain UUID to a cascading foreign key back to `note_links`.
+  - Extended the schema guard tests and validated the migrated PostgreSQL schema against a scratch database, including the `note_links` columns/constraints and the new `link_processing_results -> note_links` foreign key.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... pg_isready` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_note_links_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_note_links_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `note_links` columns, `(note_id, normalized_url)` uniqueness, and the `link_processing_results.link_id -> note_links.id` foreign key ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-011` as passed and added a durable note about the new `note_links` schema, link-type enum, and the foreign-key wiring into `link_processing_results`.
+  - Re-evaluated `EP-002`; all nested stories and epic-level schema acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing schema-validation patterns.
+  - Gotchas encountered
+    - `link_processing_results.link_id` can be introduced as a UUID early, then tightened to a real `note_links` foreign key once the per-note links table lands.
+  - Useful context
+    - `note_links` now owns the canonical per-note link IDs that later save, snapshot, and link-processing stories should reference instead of ad hoc URL payloads.
+---
+
+## [2026-03-14 18:34:58 +0300] - EP-002 / US-013
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create version-aware result tables for asset and link processing
+Thread: CLI run
+- What was implemented
+  - Added typed `AssetProcessingResult` and `LinkProcessingResult` SQLAlchemy models with durable OCR/caption/link text fields, per-stage statuses, warnings payloads, note/version tracking, and per-run uniqueness on `(pipeline_run_id, asset_id)` / `(pipeline_run_id, link_id)`.
+  - Expanded the existing Alembic head revision to create both result tables with cascade foreign keys back to `pipeline_runs` and `notes`, plus the asset foreign key needed for image-stage durability.
+  - Extended the schema guard tests so the repository now checks for the new models and migration statements alongside the earlier core-schema coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_processing_results_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_processing_results_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `asset_processing_results` and `link_processing_results` columns plus their primary/foreign-key and uniqueness constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-013` as passed and added a durable note about the new version-aware result tables, migration coverage, and the temporary UUID-only `link_id` until `note_links` exists.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note-links and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - SQLAlchemy declarative models cannot use `metadata` as an attribute name; map the DB column from an alternate Python attribute instead.
+  - Gotchas encountered
+    - The `link_processing_results` schema can safely land before `note_links` exists if `link_id` starts as a UUID column and the foreign key is added in the later note-links story.
+  - Useful context
+    - `asset_processing_results` already has the asset foreign key needed by OCR/caption stages, while `link_processing_results` is ready for later link-table integration without forcing this story to implement `note_links` early.
+---
+
+## [2026-03-14 18:28:11 +0300] - EP-002 / US-012
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create pipeline_runs for snapshot-based indexing runs
+Thread: CLI run
+- What was implemented
+  - Added a typed `PipelineRun` SQLAlchemy model with the fixed snapshot/timing fields, per-note relationship wiring, and uniqueness on `(note_id, index_version)`.
+  - Expanded the existing Alembic head revision to create the `pipeline_runs` table with UUID snapshot arrays, `pipeline_run_status`, timing metadata, request correlation, and a cascading foreign key back to `notes`.
+  - Extended the lightweight schema guard tests so the repository now checks for the pipeline run model and migration statements alongside the earlier core schema coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_pipeline_runs_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_pipeline_runs_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `pipeline_runs` columns plus `(note_id, index_version)` and `note_id` constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-012` as passed and added a durable note about the new pipeline run model, UUID snapshot arrays, timing metadata, and scratch-database validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note links, version-aware processing results, and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing schema-validation patterns.
+  - Gotchas encountered
+    - The Compose Postgres container can accept connections before startup finishes, so scratch-database validation should wait on `pg_isready` before running `psql` commands.
+  - Useful context
+    - `pipeline_runs` now stores snapshot membership as `uuid[]` columns and stage timing data as `jsonb`, which matches the later orchestration stories that read durable current-run metadata from Postgres.
+---
+
+## [2026-03-14 18:22:29 +0300] - EP-002 / US-010
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create assets and note_assets tables for file metadata and usage tracking
+Thread: CLI run
+- What was implemented
+  - Added typed SQLAlchemy models for `assets` and `note_assets`, including metadata-only asset fields, note-to-asset relationships, and the fixed usage-tracking join needed for Draft uploads and future save synchronization.
+  - Expanded the existing Alembic head revision to create `assets` with unique `storage_key` plus `note_assets` with `created_at`, cascade foreign keys, and composite uniqueness through the primary key.
+  - Extended the lightweight schema guard tests so the repository now checks for the new asset models and migration statements without requiring host-side optional backend dependencies.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres psql -U sematrix -d postgres -c "CREATE DATABASE sematrix_assets_check;"` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_assets_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `assets` and `note_assets` columns, unique `assets.storage_key`, and `note_assets` primary/foreign-key constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-010` as passed and added a durable note about the new asset schema models, usage-tracking join table, and scratch-database validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note links, pipeline, version-aware result, and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Scratch migration validation in this repo should create the target PostgreSQL database explicitly before invoking Alembic.
+  - Gotchas encountered
+    - `alembic upgrade head` against PostgreSQL fails immediately if `DATABASE_URL` points at a database name that has not been created yet, even when the server itself is reachable.
+  - Useful context
+    - The `assets` table now stores only file metadata, while note usage/liveness is represented strictly through `note_assets`, matching the later upload and cleanup stories.
+---
+
+## [2026-03-14 18:18:00 +0300] - EP-002 / US-009
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Enable pgvector and create folders, notes, tags, and note_tags tables
+Thread: CLI run
+- What was implemented
+  - Added typed SQLAlchemy models in `backend/app/infra/models.py` for `folders`, `notes`, `tags`, and `note_tags`, including the fixed note status enum, UUID identifiers, JSONB note content/warnings, `search_text`, generated `search_tsv`, and `VECTOR(1024)` embedding fields.
+  - Expanded the existing Alembic head revision to enable the `vector` extension and create the four core tables with the required folder-name/tag-name uniqueness and note-to-tag uniqueness through the composite primary key.
+  - Extended the lightweight migration guard tests so the repository now checks for the core schema model definitions and the migration contents without requiring host-side optional backend dependencies.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/env.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/requirements.txt`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_schema_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `vector` extension, `folders/notes/tags/note_tags` tables, core `notes` columns, and `note_tags` uniqueness ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-009` as passed and added a durable note about the new core schema models, the `pgvector` extension, and the scratch-database migration validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the assets, links, pipeline, and index-focused schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Manual Postgres enum creation in Alembic must be paired with `create_type=False` on the column enum to keep the migration idempotent within one revision run.
+  - Gotchas encountered
+    - Re-running migration validation after editing Alembic files requires rebuilding the `backend` image first, because `docker compose run` executes the code baked into the existing image.
+  - Useful context
+    - The current `notes` schema already carries the final RU+EN generated `search_tsv` expression and `VECTOR(1024)` column, so follow-up schema stories can focus on remaining tables and indices instead of reworking those core columns.
+---
+
+## [2026-03-14 18:09:45 +0300] - EP-002 / US-008
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Initialize SQLAlchemy models and Alembic migration workflow
+Thread: CLI run
+- What was implemented
+  - Added SQLAlchemy 2.x foundation code in `backend/app/infra/db.py` with a shared declarative base, naming convention, engine factory, and sessionmaker bound to `DATABASE_URL`.
+  - Wired Alembic under `backend/alembic` with `alembic.ini`, a standard `env.py`, a script template, and an initial baseline revision so schema changes can be managed through migrations from here forward.
+  - Added lightweight repository tests that guard the migration scaffold and the presence of the shared SQLAlchemy base without forcing local pytest to import optional backend dependencies.
+- Files changed
+  - `backend/requirements.txt`
+  - `backend/alembic.ini`
+  - `backend/alembic/env.py`
+  - `backend/alembic/script.py.mako`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/app/infra/db.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (11 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_alembic_check backend alembic upgrade head` ✅
+  - `docker compose exec -T postgres psql -U sematrix -d sematrix_alembic_check -c "SELECT version_num FROM alembic_version;"` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-008` as passed and added a durable note about the shared SQLAlchemy base plus the baseline Alembic workflow.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the actual schema tables, pgvector, generated search column, and indices stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - A scratch database created inside the Compose Postgres service is a reliable acceptance check for migration stories before the full backend API exists.
+  - Gotchas encountered
+    - Keeping the new migration guard tests file-based avoids forcing host-side `pytest` to import SQLAlchemy before the backend image or virtualenv is prepared.
+  - Useful context
+    - The current Alembic head is `20260314_1800`, and later schema stories can extend it with real tables without replacing the migration bootstrap files.
+---
 
 ## [2026-03-14 17:50:46 +0300] - EP-001 / epic-finalization
 Epic: Local infrastructure and Docker Compose bootstrap
