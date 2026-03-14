@@ -51,4 +51,4 @@ def test_note_detail_route_uses_service_not_found_handling() -> None:
     assert "def get_note(self, note_id: UUID) -> NoteResult:" in domain_source
     assert 'raise NotFoundError("Note not found")' in domain_source
     assert "def get_note(self, note_id: UUID) -> NoteRecord | None:" in infra_source
-    assert "note = self._session.get(Note, note_id)" in infra_source
+    assert "note = self._get_note_with_relations(note_id)" in infra_source

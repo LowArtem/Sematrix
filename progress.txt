@@ -21,6 +21,47 @@
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
+- Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
+
+## [2026-03-14 19:58:49 +0300] - EP-004 / US-026
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement PATCH /api/notes/{id} save flow up to pipeline entry
+Thread: CLI run
+- What was implemented
+  - Added `PATCH /api/notes/{note_id}` in `backend/app/api/routes/notes.py` with the fixed split response contract: `200 NoteDetailDto` for non-meaningful Draft saves and `202 AsyncAcceptedDto` when the save starts Processing.
+  - Added save orchestration in `backend/app/domain/notes.py`, `backend/app/domain/note_content.py`, and `backend/app/infra/notes.py` so the backend now rebuilds `content_text_flat`, extracts image `assetId`s and `http/https` links from Tiptap `content_json`, synchronizes `note_assets`/`note_links`, creates missing normalized tags, and decides Draft vs Processing before persistence.
+  - Added `backend/app/infra/pipeline.py` plus the `sematrix.start_pipeline` worker entrypoint in `backend/app/workers/tasks.py`, and wired `backend/app/api/dependencies.py` so meaningful saves increment `index_version`, clear stale runtime warning state, set `status=Processing`, and enqueue the single pipeline entrypoint with the current request id.
+- Files changed
+  - `backend/app/api/dependencies.py`
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/note_content.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_note_create_api.py`
+  - `backend/tests/test_note_save_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (41 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres redis` ✅
+  - `docker compose exec -T postgres pg_isready -U sematrix -d postgres` + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... POST /api/notes + PATCH /api/notes/{id} Draft/Processing smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-026` as passed and added a durable note about the layered save flow, shared Tiptap parsing, relation synchronization, and the `sematrix.start_pipeline` entrypoint enqueue.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, note delete, reindex, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep Tiptap save parsing in a dedicated helper so save, reindex, and later cleanup logic can share one source for flattened text plus extracted asset and link references.
+  - Gotchas encountered
+    - Removing missing `note_links` on save must explicitly delete orphaned `NoteLink` rows; reassigning a plain SQLAlchemy one-to-many list risks leaving `note_id` null on a non-nullable foreign key.
+  - Useful context
+    - Meaningful save detection now treats any non-whitespace flattened text, extracted image asset, or extracted `http/https` link as enough to move the note into `Processing` and return the short async response.
+---
 
 ## [2026-03-14 19:39:39 +0300] - EP-004 / US-024
 Epic: Folders, tags, assets, and note CRUD domain flows

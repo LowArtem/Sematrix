@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import re
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
+from app.domain.note_content import parse_note_content
 from app.domain.errors import NotFoundError
 from app.domain.tags import normalize_tag_names
 from app.infra.notes import NoteRecord, NoteRepository
@@ -60,9 +61,24 @@ class ParsedNoteQuery:
     tag_names: list[str]
 
 
+@dataclass(frozen=True)
+class NoteSaveOutcome:
+    note: NoteResult
+    pipeline_started: bool
+
+
+class PipelineDispatcher(Protocol):
+    def start_pipeline(self, *, note_id: UUID, index_version: int, request_id: str | None) -> None: ...
+
+
 class NoteService:
-    def __init__(self, note_repository: NoteRepository) -> None:
+    def __init__(
+        self,
+        note_repository: NoteRepository,
+        pipeline_dispatcher: PipelineDispatcher,
+    ) -> None:
         self._note_repository = note_repository
+        self._pipeline_dispatcher = pipeline_dispatcher
 
     def create_note(self) -> NoteResult:
         return self._to_result(self._note_repository.create_note())
@@ -93,6 +109,40 @@ class NoteService:
             total=result.total,
             limit=result.limit,
             offset=result.offset,
+        )
+
+    def save_note(
+        self,
+        note_id: UUID,
+        *,
+        title: str,
+        folder_id: UUID | None,
+        tags: list[str],
+        content_json: dict[str, Any],
+        request_id: str | None,
+    ) -> NoteSaveOutcome:
+        parsed_content = parse_note_content(content_json)
+        save_result = self._note_repository.save_note(
+            note_id=note_id,
+            title=title.strip(),
+            folder_id=folder_id,
+            tag_names=tags,
+            content_json=content_json,
+            content_text_flat=parsed_content.content_text_flat,
+            asset_ids=parsed_content.asset_ids,
+            links=parsed_content.links,
+        )
+
+        if save_result.pipeline_started:
+            self._pipeline_dispatcher.start_pipeline(
+                note_id=save_result.note.id,
+                index_version=save_result.note.index_version,
+                request_id=request_id,
+            )
+
+        return NoteSaveOutcome(
+            note=self._to_result(save_result.note),
+            pipeline_started=save_result.pipeline_started,
         )
 
     @staticmethod

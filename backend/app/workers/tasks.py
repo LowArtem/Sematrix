@@ -14,3 +14,27 @@ def ping(self) -> str:
     )
     service = WorkerHeartbeatService()
     return service.ping()
+
+
+@celery_app.task(bind=True, name="sematrix.start_pipeline")
+def start_pipeline(
+    self,
+    note_id: str,
+    index_version: int,
+    request_id: str | None = None,
+) -> dict[str, object]:
+    logger.info(
+        "pipeline_entrypoint_requested",
+        extra={
+            "event": "pipeline_entrypoint_requested",
+            "task_name": self.name,
+            "note_id": note_id,
+            "index_version": index_version,
+            "request_id": request_id,
+        },
+    )
+    return {
+        "status": "accepted",
+        "note_id": note_id,
+        "index_version": index_version,
+    }

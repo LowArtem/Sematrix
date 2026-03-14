@@ -413,8 +413,8 @@
             "If the note remains Draft the endpoint returns 200 with NoteDetailDto; if processing starts it returns 202 with AsyncAcceptedDto"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This task must not implement partial autosave or realtime status push. Save is explicit only."
+          "passes": true,
+          "notes": "This task must not implement partial autosave or realtime status push. Save is explicit only. Implemented `PATCH /api/notes/{id}` through the note service/repository layers so save rebuilds `content_text_flat`, extracts and normalizes `http/https` links plus image `assetId`s from `content_json`, synchronizes `note_assets` and `note_links`, returns `200 NoteDetailDto` for non-meaningful Draft saves, and returns `202 AsyncAcceptedDto` after incrementing `index_version`, setting `Processing`, and enqueueing the `sematrix.start_pipeline` entrypoint with the current request id."
         },
         {
           "id": "US-027",

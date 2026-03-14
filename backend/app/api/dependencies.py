@@ -9,6 +9,7 @@ from app.domain.system import SystemStatusService
 from app.infra import SessionLocal
 from app.infra.folders import SqlAlchemyFolderRepository
 from app.infra.notes import SqlAlchemyNoteRepository
+from app.infra.pipeline import CeleryPipelineDispatcher
 from app.infra.system import RuntimeMetadataRepository
 
 
@@ -29,4 +30,7 @@ def get_folder_service(session: Session = Depends(get_db_session)) -> FolderServ
 
 
 def get_note_service(session: Session = Depends(get_db_session)) -> NoteService:
-    return NoteService(note_repository=SqlAlchemyNoteRepository(session=session))
+    return NoteService(
+        note_repository=SqlAlchemyNoteRepository(session=session),
+        pipeline_dispatcher=CeleryPipelineDispatcher(),
+    )
