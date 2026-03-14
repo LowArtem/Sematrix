@@ -262,8 +262,8 @@
             "Search, link fetch, model, and cleanup settings are configurable only via ENV"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "All limits and switches must come from ENV. Do not invent a separate config UI or file-based config as the primary source."
+          "passes": true,
+          "notes": "All limits and switches must come from ENV. Do not invent a separate config UI or file-based config as the primary source. Added a shared `app.core.config` settings loader that covers every fixed ENV name from the spec with validated int/bool parsing and compose-friendly defaults, and wired both FastAPI/Celery bootstrap code to consume that shared settings entrypoint instead of ad hoc `os.getenv(...)` calls."
         },
         {
           "id": "US-017",
@@ -307,7 +307,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton now follows the required api -> domain -> infra split, but the configuration, unified error format, public DTO, and structured logging stories are still open."
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton and shared ENV-driven settings layer now follow the required architecture, but the unified error format, public DTO, and structured logging stories are still open."
     },
     {
       "id": "EP-004",

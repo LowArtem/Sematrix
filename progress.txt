@@ -15,6 +15,44 @@
 - In SQLAlchemy declarative models, do not use `metadata` as a Python attribute name; map the database column with an alternate attribute such as `metadata_json = mapped_column("metadata", ...)`.
 - For schema/index stories, validate the final PostgreSQL indexes from `pg_indexes` against a scratch migrated database instead of assuming SQLAlchemy/Alembic declarations rendered exactly as intended.
 - Keep Celery tasks in dedicated `app/workers` modules registered via the Celery app, and keep host-side backend-foundation tests source-based when they only need to verify architectural wiring.
+- Keep backend ENV parsing centralized in `app/core/config.py` and have FastAPI/Celery bootstrap code consume shared settings there instead of scattering raw `os.getenv(...)` calls across entrypoints.
+
+## [2026-03-14 18:59:47 +0300] - EP-003 / US-016
+Epic: Backend application skeleton, configuration, and API contracts
+Epic Branch: ralph/sematrix-mvp/ep-003-backend-foundation
+Story: Implement environment-driven configuration with all mandatory ENV names
+Thread: CLI run
+- What was implemented
+  - Added a shared `app.core.config` settings module that reads every mandatory spec ENV name with validated int/bool parsing and compose-friendly defaults.
+  - Wired FastAPI startup and Celery bootstrap to consume the shared settings entrypoint so backend configuration now stays centralized instead of using scattered `os.getenv(...)` calls.
+  - Updated the backend container command to respect `API_HOST` and `API_PORT`, and added tests that guard both the declared ENV surface and runtime parsing behavior.
+- Files changed
+  - `AGENTS.md`
+  - `backend/Dockerfile`
+  - `backend/app/core/__init__.py`
+  - `backend/app/core/config.py`
+  - `backend/app/main.py`
+  - `backend/app/workers/celery_app.py`
+  - `backend/tests/test_backend_config.py`
+  - `backend/tests/test_backend_foundation.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (20 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "from app.core import load_settings; ..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-016` as passed and added a durable note about the shared settings loader, validated ENV parsing, and centralized API/Celery config wiring.
+  - Re-evaluated `EP-003`; it remains `passes: false` because the unified error handling, public DTO, and structured logging stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep backend ENV parsing centralized in `app/core/config.py` so API and worker bootstraps share one validated settings entrypoint.
+  - Gotchas encountered
+    - Loading a module via `importlib.util.module_from_spec(...)` in host-side tests needs `sys.modules[spec.name] = module` before `exec_module(...)` when the module defines dataclasses under Python 3.14.
+  - Useful context
+    - `backend/Dockerfile` now launches Uvicorn through `API_HOST`/`API_PORT`, while Celery still picks broker/result-backend values from the shared settings loader.
+---
 
 ## [2026-03-14 18:54:30 +0300] - EP-003 / US-015
 Epic: Backend application skeleton, configuration, and API contracts

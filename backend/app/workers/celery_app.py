@@ -1,12 +1,15 @@
-import os
-
 from celery import Celery
+
+from app.core import get_settings
+
+
+settings = get_settings()
 
 
 celery_app = Celery(
     "sematrix",
-    broker=os.getenv("REDIS_URL", "redis://redis:6379/0"),
-    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1"),
+    broker=settings.redis_url,
+    backend=settings.celery_result_backend,
     include=["app.workers.tasks"],
 )
 
