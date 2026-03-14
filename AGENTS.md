@@ -63,6 +63,7 @@ Backend foundation convention:
 - Keep Celery tasks in dedicated modules under `backend/app/workers`; `celery_app.py` should register those modules and stay focused on Celery configuration.
 - Keep worker task bodies thin and delegate business behavior to `backend/app/domain` services.
 - Keep ENV parsing centralized in `backend/app/core/config.py` and have API/worker bootstrap code read shared settings from there instead of scattering `os.getenv(...)` calls across entrypoints.
+- Keep public API error normalization centralized in `backend/app/api/errors.py` and register FastAPI exception handlers during app bootstrap instead of per-route try/except shaping.
 
 Preserve clean separation: **api -> domain -> infra**.
 Do not move business logic into route handlers or UI code.

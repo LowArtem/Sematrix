@@ -275,8 +275,8 @@
             "The backend does not leak raw FastAPI/Pydantic error payloads"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Section 4.10.1 explicitly requires a single JSON error shape and forbids exposing raw default framework errors."
+          "passes": true,
+          "notes": "Section 4.10.1 explicitly requires a single JSON error shape and forbids exposing raw default framework errors. Added a shared `ApiErrorDto` plus centralized FastAPI exception handlers in `app.api.errors`, registered from app bootstrap so validation failures and 404/409/413/415/422/500 responses now return the unified JSON payload."
         },
         {
           "id": "US-018",
@@ -307,7 +307,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton and shared ENV-driven settings layer now follow the required architecture, but the unified error format, public DTO, and structured logging stories are still open."
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API. The FastAPI/Celery skeleton, shared ENV-driven settings layer, and unified API error format now follow the required foundation constraints, but the public DTO and structured logging stories are still open."
     },
     {
       "id": "EP-004",

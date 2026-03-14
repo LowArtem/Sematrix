@@ -16,6 +16,7 @@
 - For schema/index stories, validate the final PostgreSQL indexes from `pg_indexes` against a scratch migrated database instead of assuming SQLAlchemy/Alembic declarations rendered exactly as intended.
 - Keep Celery tasks in dedicated `app/workers` modules registered via the Celery app, and keep host-side backend-foundation tests source-based when they only need to verify architectural wiring.
 - Keep backend ENV parsing centralized in `app/core/config.py` and have FastAPI/Celery bootstrap code consume shared settings there instead of scattering raw `os.getenv(...)` calls across entrypoints.
+- Keep FastAPI error shaping centralized in `app/api/errors.py`; register global handlers from app bootstrap so 404/409/413/415/422/500 responses and validation payloads stay in one `ApiErrorDto` format.
 
 ## [2026-03-14 18:59:47 +0300] - EP-003 / US-016
 Epic: Backend application skeleton, configuration, and API contracts
@@ -664,6 +665,40 @@ Thread: CLI run
     - Compose stories benefit from a lightweight validation test plus a full startup smoke test, because static config checks alone miss container boot failures.
   - Gotchas encountered
     - PostgreSQL bind mounts under this workspace failed permission setup during `initdb`, so the bootstrap compose baseline uses named volumes until the dedicated storage-layout story revisits the exact host-path strategy.
+- Useful context
+  - The placeholder backend health route lives at `backend/app/main.py`, and the Celery bootstrap shared by `worker` and `beat` lives at `backend/app/workers/celery_app.py`.
+---
+
+## [2026-03-14 19:04:50 +0300] - EP-003 / US-017
+Epic: Backend application skeleton, configuration, and API contracts
+Epic Branch: ralph/sematrix-mvp/ep-003-backend-foundation
+Story: Implement unified API error handling and ApiErrorDto responses
+Thread: CLI run
+- What was implemented
+  - Added a shared `ApiErrorDto` schema plus centralized FastAPI exception handlers in `backend/app/api/errors.py` so API failures now normalize into one JSON shape.
+  - Registered the handlers during app creation in `backend/app/main.py`, covering request validation plus HTTP and unexpected exceptions without pushing error shaping into route handlers.
+  - Added source-based guard tests for the DTO/handler wiring and a backend-container smoke check that exercised 404, 409, 422, and 500 responses.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dto.py`
+  - `backend/app/api/errors.py`
+  - `backend/app/main.py`
+  - `backend/tests/test_api_error_handling.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (22 passed)
+  - `docker compose build backend` ✅
+  - `docker compose run --rm --no-deps backend python -c "...register_exception_handlers smoke check..."` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-017` as passed and added a durable note about the centralized `ApiErrorDto`/exception-handler implementation.
+  - Re-evaluated `EP-003`; it remains `passes: false` because the public DTO and structured logging stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep FastAPI error normalization centralized in `app/api/errors.py` and register it from app bootstrap so routes stay focused on HTTP/domain flow instead of response shaping.
+  - Gotchas encountered
+    - The backend image does not include `httpx`, so runtime smoke checks should call registered exception handlers directly unless/until `TestClient` support is added intentionally.
   - Useful context
-    - The placeholder backend health route lives at `backend/app/main.py`, and the Celery bootstrap shared by `worker` and `beat` lives at `backend/app/workers/celery_app.py`.
+    - The current handler map covers validation plus `404`, `409`, `413`, `415`, `422`, and `500` with stable `code` values like `validation_error` and `internal_server_error`.
 ---
