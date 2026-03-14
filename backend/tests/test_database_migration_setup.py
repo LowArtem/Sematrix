@@ -40,11 +40,14 @@ def test_core_schema_models_are_registered() -> None:
     assert "class Tag(Base):" in models_module
     assert "class NoteAsset(Base):" in models_module
     assert "class NoteTag(Base):" in models_module
+    assert "class PipelineRun(Base):" in models_module
     assert 'storage_key: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)' in models_module
     assert 'size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)' in models_module
     assert 'Vector(1024)' in models_module
     assert "to_tsvector('russian', coalesce(search_text, ''))" in models_module
     assert "to_tsvector('english', coalesce(search_text, ''))" in models_module
+    assert 'snapshot_asset_ids: Mapped[list[uuid.UUID]] = mapped_column(' in models_module
+    assert 'stage_durations_ms: Mapped[dict[str, int]] = mapped_column(' in models_module
 
 
 def test_initial_revision_creates_core_schema() -> None:
@@ -59,5 +62,9 @@ def test_initial_revision_creates_core_schema() -> None:
     assert 'op.create_table(\n        "assets"' in revision_module
     assert 'op.create_table(\n        "note_tags"' in revision_module
     assert 'op.create_table(\n        "note_assets"' in revision_module
+    assert 'op.create_table(\n        "pipeline_runs"' in revision_module
     assert 'sa.UniqueConstraint("storage_key", name=op.f("uq_assets_storage_key"))' in revision_module
+    assert 'sa.UniqueConstraint("note_id", "index_version", name=op.f("uq_pipeline_runs_note_id_index_version"))' in revision_module
+    assert 'postgresql.ARRAY(postgresql.UUID(as_uuid=True))' in revision_module
+    assert 'sa.Enum("Processing", "Ready", "Error", name="pipeline_run_status")' in revision_module
     assert 'sa.Enum("Draft", "Processing", "Ready", "Error", name="note_status")' in revision_module

@@ -14,16 +14,18 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infra.db import Base
 
 
 NOTE_STATUS_VALUES = ("Draft", "Processing", "Ready", "Error")
+PIPELINE_RUN_STATUS_VALUES = ("Processing", "Ready", "Error")
 SEARCH_TSV_EXPRESSION = (
     "to_tsvector('russian', coalesce(search_text, '')) "
     "|| to_tsvector('english', coalesce(search_text, ''))"
@@ -100,6 +102,7 @@ class Note(Base):
 
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
     assets: Mapped[list["Asset"]] = relationship(secondary="note_assets", back_populates="notes")
+    pipeline_runs: Mapped[list["PipelineRun"]] = relationship(back_populates="note")
     tags: Mapped[list["Tag"]] = relationship(secondary="note_tags", back_populates="notes")
 
 
@@ -169,3 +172,48 @@ class NoteAsset(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class PipelineRun(Base):
+    __tablename__ = "pipeline_runs"
+    __table_args__ = (UniqueConstraint("note_id", "index_version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    index_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_asset_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)),
+        nullable=False,
+        server_default=text("'{}'::uuid[]"),
+    )
+    snapshot_link_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)),
+        nullable=False,
+        server_default=text("'{}'::uuid[]"),
+    )
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        Enum(*PIPELINE_RUN_STATUS_VALUES, name="pipeline_run_status", native_enum=True),
+        nullable=False,
+        server_default=text("'Processing'"),
+    )
+    request_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stage_durations_ms: Mapped[dict[str, int]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    note: Mapped[Note] = relationship(back_populates="pipeline_runs")

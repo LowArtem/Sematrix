@@ -10,6 +10,43 @@
 - For database-foundation stories, verify `alembic upgrade head` against a freshly created scratch PostgreSQL database through `docker compose run --rm --no-deps backend ...` instead of trusting file-only migration scaffolding.
 - When an Alembic migration manually creates a PostgreSQL enum before table creation, use `postgresql.ENUM(..., create_type=False)` on the table column to avoid duplicate `CREATE TYPE` attempts during `op.create_table(...)`.
 - Create the scratch validation database explicitly inside the Compose Postgres service before running `alembic upgrade head`, since Alembic will not create the target PostgreSQL database for you.
+- Wait for `pg_isready` inside the Compose Postgres container before scratch-database `psql` setup, because the container may report as started before PostgreSQL accepts connections.
+
+## [2026-03-14 18:28:11 +0300] - EP-002 / US-012
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create pipeline_runs for snapshot-based indexing runs
+Thread: CLI run
+- What was implemented
+  - Added a typed `PipelineRun` SQLAlchemy model with the fixed snapshot/timing fields, per-note relationship wiring, and uniqueness on `(note_id, index_version)`.
+  - Expanded the existing Alembic head revision to create the `pipeline_runs` table with UUID snapshot arrays, `pipeline_run_status`, timing metadata, request correlation, and a cascading foreign key back to `notes`.
+  - Extended the lightweight schema guard tests so the repository now checks for the pipeline run model and migration statements alongside the earlier core schema coverage.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_pipeline_runs_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_pipeline_runs_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `pipeline_runs` columns plus `(note_id, index_version)` and `note_id` constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-012` as passed and added a durable note about the new pipeline run model, UUID snapshot arrays, timing metadata, and scratch-database validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note links, version-aware processing results, and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing schema-validation patterns.
+  - Gotchas encountered
+    - The Compose Postgres container can accept connections before startup finishes, so scratch-database validation should wait on `pg_isready` before running `psql` commands.
+  - Useful context
+    - `pipeline_runs` now stores snapshot membership as `uuid[]` columns and stage timing data as `jsonb`, which matches the later orchestration stories that read durable current-run metadata from Postgres.
+---
 
 ## [2026-03-14 18:22:29 +0300] - EP-002 / US-010
 Epic: Database schema, pgvector, and migrations

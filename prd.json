@@ -190,8 +190,8 @@
             "The table can store started_at, finished_at, total_duration_ms, stage_durations_ms, and processing_error"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "pipeline_runs is mandatory for race protection, snapshot validation, Ready/Error finalization, and timing logs."
+          "passes": true,
+          "notes": "pipeline_runs is mandatory for race protection, snapshot validation, Ready/Error finalization, and timing logs. Added a typed `PipelineRun` model plus Alembic schema with per-note/version uniqueness, UUID snapshot arrays, timing JSON, and scratch-Postgres validation of the migrated columns and constraints."
         },
         {
           "id": "US-013",

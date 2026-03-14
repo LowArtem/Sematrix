@@ -32,6 +32,15 @@ def upgrade() -> None:
     )
     note_status.create(op.get_bind(), checkfirst=True)
 
+    pipeline_run_status = postgresql.ENUM(
+        "Processing",
+        "Ready",
+        "Error",
+        name="pipeline_run_status",
+        create_type=False,
+    )
+    pipeline_run_status.create(op.get_bind(), checkfirst=True)
+
     op.create_table(
         "folders",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -185,14 +194,69 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("note_id", "asset_id", name=op.f("pk_note_assets")),
     )
 
+    op.create_table(
+        "pipeline_runs",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("index_version", sa.Integer(), nullable=False),
+        sa.Column(
+            "snapshot_asset_ids",
+            postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
+            server_default=sa.text("'{}'::uuid[]"),
+            nullable=False,
+        ),
+        sa.Column(
+            "snapshot_link_ids",
+            postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
+            server_default=sa.text("'{}'::uuid[]"),
+            nullable=False,
+        ),
+        sa.Column("snapshot_hash", sa.String(length=64), nullable=False),
+        sa.Column(
+            "status",
+            pipeline_run_status,
+            server_default=sa.text("'Processing'"),
+            nullable=False,
+        ),
+        sa.Column("request_id", sa.String(length=255), nullable=True),
+        sa.Column(
+            "started_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("total_duration_ms", sa.Integer(), nullable=True),
+        sa.Column(
+            "stage_durations_ms",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column("processing_error", sa.Text(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["note_id"],
+            ["notes.id"],
+            name=op.f("fk_pipeline_runs_note_id_notes"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_pipeline_runs")),
+        sa.UniqueConstraint("note_id", "index_version", name=op.f("uq_pipeline_runs_note_id_index_version")),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("pipeline_runs")
     op.drop_table("note_assets")
     op.drop_table("note_tags")
     op.drop_table("assets")
     op.drop_table("tags")
     op.drop_table("notes")
     op.drop_table("folders")
+    sa.Enum("Processing", "Ready", "Error", name="pipeline_run_status").drop(
+        op.get_bind(),
+        checkfirst=True,
+    )
     sa.Enum("Draft", "Processing", "Ready", "Error", name="note_status").drop(
         op.get_bind(),
         checkfirst=True,
