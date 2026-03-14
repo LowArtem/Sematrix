@@ -79,8 +79,8 @@
             "Ollama sets OLLAMA_CONTEXT_LENGTH=4096"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "These exact Ollama settings are fixed in the spec and must not be replaced with alternative heuristics."
+          "passes": true,
+          "notes": "These exact Ollama settings are fixed in the spec and must not be replaced with alternative heuristics. The Compose stack now pins the required Ollama env values and reserves all NVIDIA GPUs through `deploy.resources.reservations.devices`, which keeps `docker compose config` validation working in this repository while still expressing GPU passthrough intent."
         },
         {
           "id": "US-006",
@@ -111,7 +111,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced."
+      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. EP-001 remains open until automatic Ollama model initialization and SPA runtime proxying are implemented."
     },
     {
       "id": "EP-002",

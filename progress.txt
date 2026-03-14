@@ -3,6 +3,39 @@
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
 - For localhost-only Compose exposure, use long-form `ports` mappings with `host_ip: 127.0.0.1` and verify the rendered `docker compose config` output in tests.
 - For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
+- For Ollama GPU passthrough in this repo, prefer `deploy.resources.reservations.devices` over a top-level `gpus` key because the current Compose validator rejects `services.<name>.gpus` during `docker compose config`.
+
+## [2026-03-14 16:38:38 +0300] - EP-001 / US-005
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Configure Ollama with the mandatory GPU and stability settings
+Thread: CLI run
+- What was implemented
+  - Added Ollama GPU passthrough configuration through Compose device reservations for all NVIDIA GPUs.
+  - Pinned the required Ollama stability environment values in `docker-compose.yml`: `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_NUM_PARALLEL=1`, and `OLLAMA_CONTEXT_LENGTH=4096`.
+  - Added compose test coverage for the rendered GPU reservation and Ollama environment settings, plus a README note documenting the runtime constraint.
+- Files changed
+  - `docker-compose.yml`
+  - `backend/tests/test_docker_compose.py`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (6 passed)
+  - `docker compose config` ✅
+  - `docker compose config --services` ✅
+  - `docker compose up --build -d` + `docker compose port backend 8000` + `docker compose port frontend 80` + HTTP smoke checks for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:8080` + `docker compose down` ✅
+- PRD updates made
+  - Marked `US-005` as passed and added a durable note about the required Ollama env pins plus the Compose GPU reservation syntax used here.
+  - Re-evaluated `EP-001`; it remains `passes: false` because the automatic model initialization and SPA runtime proxy stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - This Compose toolchain accepts GPU passthrough through `deploy.resources.reservations.devices`, and the rendered config normalizes `count: all` to `count: -1`.
+  - Gotchas encountered
+    - The top-level Compose `gpus` key is rejected by `docker compose config` in this environment, so tests should guard the rendered device reservation instead.
+  - Useful context
+    - The Ollama container still starts cleanly in the local smoke test with the required stability env vars and device reservation present.
+---
 
 ## [2026-03-14 16:34:29 +0300] - EP-001 / US-004
 Epic: Local infrastructure and Docker Compose bootstrap

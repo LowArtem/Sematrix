@@ -57,3 +57,21 @@ def test_compose_uses_fixed_host_data_directories() -> None:
     assert f"type: bind\n        source: {ollama_path}\n        target: /root/.ollama" in result.stdout
     assert result.stdout.count(f"source: {assets_path}") == 3
     assert result.stdout.count("target: /data/assets") == 3
+
+
+def test_compose_pins_ollama_gpu_and_stability_settings() -> None:
+    result = subprocess.run(
+        ["docker", "compose", "config"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "driver: nvidia" in result.stdout
+    assert "capabilities:\n                - gpu" in result.stdout
+    assert "count: -1" in result.stdout
+    assert 'OLLAMA_FLASH_ATTENTION: "1"' in result.stdout
+    assert "OLLAMA_KV_CACHE_TYPE: q8_0" in result.stdout
+    assert 'OLLAMA_NUM_PARALLEL: "1"' in result.stdout
+    assert 'OLLAMA_CONTEXT_LENGTH: "4096"' in result.stdout
