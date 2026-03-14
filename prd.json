@@ -111,7 +111,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. All nested user stories are now complete, but the epic still cannot be marked passed because `docker compose up --build` currently fails in this environment when `ollama-init` exits unsuccessfully before the full stack becomes ready, so the epic-level one-command startup acceptance criterion is not yet satisfied by the observed repository state."
+      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced. `docker compose up --build` now satisfies the epic acceptance criteria again after pinning both `ollama` services to the current compatible official image digest, which allows `ollama-init` to pull `qwen3.5:9b` and `bge-m3` successfully before backend, worker, and beat start."
     },
     {
       "id": "EP-002",

@@ -5,7 +5,40 @@
 - For bind-mounted Postgres data under `./data/postgres`, set `PGDATA` to a child directory so `initdb` can initialize cleanly against the fixed host path.
 - For Ollama GPU passthrough in this repo, prefer `deploy.resources.reservations.devices` over a top-level `gpus` key because the current Compose validator rejects `services.<name>.gpus` during `docker compose config`.
 - For automatic Ollama model availability, use a one-shot `ollama-init` service that shares `./data/ollama`, waits for the API, and gates model-dependent services with `condition: service_completed_successfully`.
+- When Ollama model compatibility outruns usable Docker tags, pin the official `ollama/ollama` image by digest in Compose so `ollama` and `ollama-init` stay reproducible while still matching the required model set.
 - Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
+
+## [2026-03-14 17:50:46 +0300] - EP-001 / epic-finalization
+Epic: Local infrastructure and Docker Compose bootstrap
+Epic Branch: ralph/sematrix-mvp/ep-001-local-infra-bootstrap
+Story: Finalize EP-001 after ollama-init startup fix
+Thread: CLI run
+- What was implemented
+  - Traced the `ollama-init` failure to an Ollama image compatibility mismatch: the pinned image could not pull the required `qwen3.5:9b` model and exited before dependent services could start.
+  - Updated both `ollama` and `ollama-init` to the current compatible official `ollama/ollama` image digest so the one-shot model bootstrap completes successfully and unblocks backend, worker, beat, and frontend startup.
+  - Re-ran the full `docker compose up --build` flow and confirmed the backend health endpoint, frontend root, and frontend `/api` proxy all respond on the required localhost-only ports.
+- Files changed
+  - `docker-compose.yml`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (8 passed)
+  - `docker compose up --build -d` ✅
+  - `curl -fsS http://127.0.0.1:8000/api/health` ✅
+  - `curl -fsS http://127.0.0.1:8080` ✅
+  - `curl -fsS http://127.0.0.1:8080/api/health` ✅
+  - `docker compose ps` ✅
+- PRD updates made
+  - Marked `EP-001` as passed after re-validating the epic acceptance criteria against the fixed Compose startup path.
+  - Replaced the old epic note about the blocked `ollama-init` path with the final durable note about the digest-pinned compatible Ollama image.
+- Learnings for future iterations:
+  - Patterns discovered
+    - For model-pulled local runtimes, a pinned image digest can be safer than a guessed version tag when compatibility depends on the remote model catalog.
+  - Gotchas encountered
+    - The `org.opencontainers.image.version` label on `ollama/ollama:latest` is not a guaranteed pullable Docker tag, so treating it as one breaks reproducible startup.
+  - Useful context
+    - The compatible official image currently resolves to `sha256:0aadc9311b2ecb21ee5266927ac46ae3710c01ed06584c184f0c533cace2e202`, which reports Ollama `0.17.8-rc4` at runtime in this environment.
+---
 
 ## [2026-03-14 16:59:52 +0300] - EP-001 / US-007
 Epic: Local infrastructure and Docker Compose bootstrap
