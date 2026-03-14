@@ -49,8 +49,44 @@ Thread: CLI run
     - Keep tag validation and normalization centralized in `app/domain/tags.py` so DTO validation and note-save logic cannot drift on allowed characters or lowercase rules.
   - Gotchas encountered
     - Source-based tests are less brittle here if they assert durable rule strings instead of the exact single-line formatting of multi-line `raise` statements.
+- Useful context
+  - `NoteSaveRequestDto.tags` now returns normalized unique tag names such as `['foo', 'бар']`, so later note-save persistence can treat the payload as already backend-normalized.
+---
+
+## [2026-03-14 19:35:30 +0300] - EP-004 / US-023
+Epic: Folders, tags, assets, and note CRUD domain flows
+Epic Branch: ralph/sematrix-mvp/ep-004-note-crud-assets-tags
+Story: Implement POST /api/notes to create an empty Draft note before editing
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/api/routes/notes.py` and router wiring for `POST /api/notes`, returning `201 Created` with the full `NoteDetailDto` payload for a freshly created Draft note.
+  - Added repository/domain/dependency wiring in `backend/app/infra/notes.py`, `backend/app/domain/notes.py`, and `backend/app/api/dependencies.py` so note creation stays in the backend layers and persists the minimal empty Tiptap document required before asset uploads.
+  - Added `backend/tests/test_note_create_api.py` plus a scratch-Postgres container smoke check that boots the FastAPI app and verifies the endpoint returns Draft defaults, timestamps, and the empty document contract.
+- Files changed
+  - `backend/app/api/dependencies.py`
+  - `backend/app/api/router.py`
+  - `backend/app/api/routes/notes.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_create_api.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (33 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` + scratch database create + `docker compose run --rm --no-deps -e DATABASE_URL=... backend alembic upgrade head` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=... backend python - <<'PY' ... POST /api/notes smoke test ... PY` ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-023` as passed and added a durable note about the layered note-create flow and the minimal empty Tiptap document returned by the backend.
+  - Re-evaluated `EP-004`; it remains `passes: false` because the tag listing, note detail/list/save/delete/reindex, and asset endpoint stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - None beyond the existing request-scoped dependency and repository/service layering patterns.
+  - Gotchas encountered
+    - A note can rely on database defaults for Draft metadata, but the create path should still set the empty Tiptap document explicitly so the API response always returns the fixed minimal editor shape.
   - Useful context
-    - `NoteSaveRequestDto.tags` now returns normalized unique tag names such as `['foo', 'бар']`, so later note-save persistence can treat the payload as already backend-normalized.
+    - `POST /api/notes` now returns an immediately usable server-side `note_id`, which unblocks the later image-upload story that must reject uploads without a real note.
 ---
 
 ## [2026-03-14 19:25:46 +0300] - EP-004 / US-020
