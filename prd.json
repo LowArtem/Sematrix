@@ -164,8 +164,8 @@
             "The schema supports determining whether an asset is still used by any note"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "Files live on disk in ./data/assets. The database stores metadata only. note_assets is mandatory for save synchronization, deletion, snapshotting, and Draft uploads."
+          "passes": true,
+          "notes": "Files live on disk in ./data/assets. The database stores metadata only. Added typed SQLAlchemy models plus Alembic schema for `assets` and `note_assets`, including metadata-only asset fields, unique `storage_key`, note-to-asset usage tracking, and scratch-database validation of the migrated tables and constraints."
         },
         {
           "id": "US-011",

@@ -9,6 +9,43 @@
 - Keep Docker build context lean with a repo-root `.dockerignore`, especially excluding `frontend/node_modules` and `frontend/dist` so local frontend artifacts do not leak into image builds.
 - For database-foundation stories, verify `alembic upgrade head` against a freshly created scratch PostgreSQL database through `docker compose run --rm --no-deps backend ...` instead of trusting file-only migration scaffolding.
 - When an Alembic migration manually creates a PostgreSQL enum before table creation, use `postgresql.ENUM(..., create_type=False)` on the table column to avoid duplicate `CREATE TYPE` attempts during `op.create_table(...)`.
+- Create the scratch validation database explicitly inside the Compose Postgres service before running `alembic upgrade head`, since Alembic will not create the target PostgreSQL database for you.
+
+## [2026-03-14 18:22:29 +0300] - EP-002 / US-010
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Create assets and note_assets tables for file metadata and usage tracking
+Thread: CLI run
+- What was implemented
+  - Added typed SQLAlchemy models for `assets` and `note_assets`, including metadata-only asset fields, note-to-asset relationships, and the fixed usage-tracking join needed for Draft uploads and future save synchronization.
+  - Expanded the existing Alembic head revision to create `assets` with unique `storage_key` plus `note_assets` with `created_at`, cascade foreign keys, and composite uniqueness through the primary key.
+  - Extended the lightweight schema guard tests so the repository now checks for the new asset models and migration statements without requiring host-side optional backend dependencies.
+- Files changed
+  - `backend/app/infra/models.py`
+  - `backend/app/infra/__init__.py`
+  - `backend/alembic/versions/20260314_1800_initialize_alembic.py`
+  - `backend/tests/test_database_migration_setup.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres psql -U sematrix -d postgres -c "CREATE DATABASE sematrix_assets_check;"` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_assets_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for the `assets` and `note_assets` columns, unique `assets.storage_key`, and `note_assets` primary/foreign-key constraints ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Marked `US-010` as passed and added a durable note about the new asset schema models, usage-tracking join table, and scratch-database validation.
+  - Re-evaluated `EP-002`; it remains `passes: false` because the note links, pipeline, version-aware result, and index-specific schema stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Scratch migration validation in this repo should create the target PostgreSQL database explicitly before invoking Alembic.
+  - Gotchas encountered
+    - `alembic upgrade head` against PostgreSQL fails immediately if `DATABASE_URL` points at a database name that has not been created yet, even when the server itself is reachable.
+  - Useful context
+    - The `assets` table now stores only file metadata, while note usage/liveness is represented strictly through `note_assets`, matching the later upload and cleanup stories.
+---
 
 ## [2026-03-14 18:18:00 +0300] - EP-002 / US-009
 Epic: Database schema, pgvector, and migrations

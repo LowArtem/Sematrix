@@ -4,7 +4,19 @@ from datetime import datetime
 import uuid
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Computed, DateTime, Enum, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Computed,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -87,6 +99,7 @@ class Note(Base):
     embedding: Mapped[object | None] = mapped_column(Vector(1024), nullable=True)
 
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
+    assets: Mapped[list["Asset"]] = relationship(secondary="note_assets", back_populates="notes")
     tags: Mapped[list["Tag"]] = relationship(secondary="note_tags", back_populates="notes")
 
 
@@ -104,6 +117,25 @@ class Tag(Base):
     notes: Mapped[list[Note]] = relationship(secondary="note_tags", back_populates="tags")
 
 
+class Asset(Base):
+    __tablename__ = "assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    storage_key: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_ext: Mapped[str] = mapped_column(String(32), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    notes: Mapped[list[Note]] = relationship(secondary="note_assets", back_populates="assets")
+
+
 class NoteTag(Base):
     __tablename__ = "note_tags"
 
@@ -116,4 +148,24 @@ class NoteTag(Base):
         UUID(as_uuid=True),
         ForeignKey("tags.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+
+
+class NoteAsset(Base):
+    __tablename__ = "note_assets"
+
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )

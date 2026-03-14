@@ -36,8 +36,12 @@ def test_core_schema_models_are_registered() -> None:
 
     assert "class Folder(Base):" in models_module
     assert "class Note(Base):" in models_module
+    assert "class Asset(Base):" in models_module
     assert "class Tag(Base):" in models_module
+    assert "class NoteAsset(Base):" in models_module
     assert "class NoteTag(Base):" in models_module
+    assert 'storage_key: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)' in models_module
+    assert 'size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)' in models_module
     assert 'Vector(1024)' in models_module
     assert "to_tsvector('russian', coalesce(search_text, ''))" in models_module
     assert "to_tsvector('english', coalesce(search_text, ''))" in models_module
@@ -52,5 +56,8 @@ def test_initial_revision_creates_core_schema() -> None:
     assert 'op.create_table(\n        "folders"' in revision_module
     assert 'op.create_table(\n        "notes"' in revision_module
     assert 'op.create_table(\n        "tags"' in revision_module
+    assert 'op.create_table(\n        "assets"' in revision_module
     assert 'op.create_table(\n        "note_tags"' in revision_module
+    assert 'op.create_table(\n        "note_assets"' in revision_module
+    assert 'sa.UniqueConstraint("storage_key", name=op.f("uq_assets_storage_key"))' in revision_module
     assert 'sa.Enum("Draft", "Processing", "Ready", "Error", name="note_status")' in revision_module

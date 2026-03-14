@@ -123,6 +123,25 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "assets",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("storage_key", sa.String(length=512), nullable=False),
+        sa.Column("original_filename", sa.String(length=255), nullable=False),
+        sa.Column("mime_type", sa.String(length=255), nullable=False),
+        sa.Column("file_ext", sa.String(length=32), nullable=False),
+        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("sha256", sa.String(length=64), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_assets")),
+        sa.UniqueConstraint("storage_key", name=op.f("uq_assets_storage_key")),
+    )
+
+    op.create_table(
         "note_tags",
         sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("tag_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -141,9 +160,36 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("note_id", "tag_id", name=op.f("pk_note_tags")),
     )
 
+    op.create_table(
+        "note_assets",
+        sa.Column("note_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("asset_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["note_id"],
+            ["notes.id"],
+            name=op.f("fk_note_assets_note_id_notes"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["asset_id"],
+            ["assets.id"],
+            name=op.f("fk_note_assets_asset_id_assets"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("note_id", "asset_id", name=op.f("pk_note_assets")),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("note_assets")
     op.drop_table("note_tags")
+    op.drop_table("assets")
     op.drop_table("tags")
     op.drop_table("notes")
     op.drop_table("folders")
