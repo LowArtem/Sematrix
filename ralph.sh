@@ -7,7 +7,7 @@ set -e
 
 # Parse arguments
 TOOL="codex"  # Default to codex
-MAX_ITERATIONS=3
+MAX_ITERATIONS=20
 
 while [[ $# -gt 0 ]]; do
   case $1 in
