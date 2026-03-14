@@ -1,0 +1,1301 @@
+{
+  "project": "Sematrix",
+  "branchName": "ralph/sematrix-mvp",
+  "description": "Sematrix MVP: a single-user localhost-only note manager with Tiptap editing, folders and tags, inline images and links, local Ollama models, OCR/caption/link enrichment, hybrid RU+EN search, snapshot-safe background indexing, backups, and unit/integration tests.",
+  "epics": [
+    {
+      "id": "EP-001",
+      "title": "Local infrastructure and Docker Compose bootstrap",
+      "description": "Create the repository skeleton and the Docker Compose runtime so the whole MVP starts locally on one machine with one command, uses only localhost-exposed UI/API ports, and persists all required data under ./data.",
+      "acceptanceCriteria": [
+        "The repository contains the required top-level structure from the specification: backend/, frontend/, scripts/, infra/, docker-compose.yml, README.md",
+        "docker compose up --build starts the full local stack needed by the MVP",
+        "UI is exposed on http://localhost:8080 and API on http://localhost:8000, both bound to 127.0.0.1 by default",
+        "Persistent data paths follow the specification: ./data/postgres, ./data/ollama, ./data/assets"
+      ],
+      "userStories": [
+        {
+          "id": "US-001",
+          "title": "Create the repository layout exactly as specified",
+          "description": "Create the initial repository tree and baseline placeholder modules so later work fits the required architecture: backend/app/api, core, domain, infra, workers, alembic, tests, plus frontend, scripts, infra, docker-compose.yml, and README.md.",
+          "acceptanceCriteria": [
+            "Repository structure matches the paths fixed in the specification",
+            "backend contains app/api, app/core, app/domain, app/infra, app/workers, alembic, and tests directories",
+            "No extra top-level product modules that are not required by the specification are introduced"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly fixes the repository structure and layered backend separation. This task must only create the required structure and not invent extra product areas."
+        },
+        {
+          "id": "US-002",
+          "title": "Implement Docker Compose services for the complete MVP stack",
+          "description": "Define docker-compose.yml with services for postgres with pgvector, redis, ollama, backend, worker, beat, and frontend static hosting, so the system starts with one command.",
+          "acceptanceCriteria": [
+            "Compose defines services for postgres, redis, ollama, backend, worker, beat, and frontend",
+            "docker compose up --build starts all required services without manual post-setup",
+            "Frontend and backend services are reachable on the fixed ports from the spec"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The output section fixes the required services. Compose must be the single local runtime entrypoint."
+        },
+        {
+          "id": "US-003",
+          "title": "Bind published ports to localhost only",
+          "description": "Configure the compose file so only the UI and API are published by default, and both are bound to 127.0.0.1. Internal services may stay private to the Docker network.",
+          "acceptanceCriteria": [
+            "Frontend is published on 127.0.0.1:8080",
+            "Backend is published on 127.0.0.1:8000",
+            "Ollama, Postgres, and Redis are not required to be public and may remain internal by default"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Localhost-only access is a hard restriction from the spec. Do not add password protection or remote exposure as a substitute."
+        },
+        {
+          "id": "US-004",
+          "title": "Mount persistent volumes under ./data using the fixed storage layout",
+          "description": "Configure compose volumes so PostgreSQL data, Ollama cache, and uploaded assets are stored under the exact directories defined by the specification.",
+          "acceptanceCriteria": [
+            "Database data persists under ./data/postgres",
+            "Ollama model cache persists under ./data/ollama",
+            "Uploaded note files persist under ./data/assets"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly distinguishes persistent database data, model cache, and note assets. Ollama cache is not part of backups."
+        },
+        {
+          "id": "US-005",
+          "title": "Configure Ollama with the mandatory GPU and stability settings",
+          "description": "Run Ollama in Docker with GPU passthrough and set the fixed environment values required for stable operation on the target home PC GPU.",
+          "acceptanceCriteria": [
+            "Ollama service is configured for GPU passthrough",
+            "Ollama sets OLLAMA_FLASH_ATTENTION=1",
+            "Ollama sets OLLAMA_KV_CACHE_TYPE=q8_0",
+            "Ollama sets OLLAMA_NUM_PARALLEL=1",
+            "Ollama sets OLLAMA_CONTEXT_LENGTH=4096"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "These exact Ollama settings are fixed in the spec and must not be replaced with alternative heuristics."
+        },
+        {
+          "id": "US-006",
+          "title": "Add automatic model initialization for the required local models",
+          "description": "Implement an init mechanism that automatically pulls qwen3.5:9b and bge-m3 on first startup so the MVP is usable after docker compose up --build.",
+          "acceptanceCriteria": [
+            "Startup flow automatically makes qwen3.5:9b available in Ollama",
+            "Startup flow automatically makes bge-m3 available in Ollama",
+            "No manual model pulling step is required beyond running the documented startup command"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec requires automatic model availability and explicitly names qwen3.5:9b and bge-m3 as the MVP model set."
+        },
+        {
+          "id": "US-007",
+          "title": "Serve the built React SPA and route browser API calls to /api",
+          "description": "Create the frontend runtime container using Nginx or serve so the built SPA is available on port 8080 and can call the backend API under the fixed /api prefix.",
+          "acceptanceCriteria": [
+            "The SPA is served on http://localhost:8080",
+            "Browser calls to /api reach the backend correctly",
+            "The setup remains a single-user localhost-only application without authentication"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The frontend stack is React + TypeScript via Vite, and the API prefix is fixed to /api. This task is only about runtime serving/proxying, not UI implementation."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic covers only local runtime infrastructure fixed by the spec: Python backend, React frontend, Postgres+pgvector, Redis, Ollama in Docker with GPU, Celery worker, Celery beat, and static frontend serving. No auth, no multi-user mode, no external model APIs, and no alternative ports or deployment modes may be introduced."
+    },
+    {
+      "id": "EP-002",
+      "title": "Database schema, pgvector, and migrations",
+      "description": "Create the exact MVP PostgreSQL schema with SQLAlchemy 2.x and Alembic, including pgvector support, generated full-text columns, version-aware pipeline tables, and required indices.",
+      "acceptanceCriteria": [
+        "Alembic migrations reproduce the complete MVP schema from an empty database",
+        "The schema includes all required tables and relationships named in the specification",
+        "notes.search_tsv is implemented as the exact STORED RU+EN generated column required by the specification",
+        "notes.embedding uses VECTOR(1024) and the backend can validate embedding dimensionality on write"
+      ],
+      "userStories": [
+        {
+          "id": "US-008",
+          "title": "Initialize SQLAlchemy models and Alembic migration workflow",
+          "description": "Set up SQLAlchemy 2.x metadata and Alembic so all schema changes are managed through migrations against PostgreSQL.",
+          "acceptanceCriteria": [
+            "Alembic is configured under backend/alembic",
+            "Database models are represented in backend code",
+            "A clean database can be migrated to the current schema"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The backend stack is fixed to SQLAlchemy 2.x + Alembic + PostgreSQL. This task is only the migration foundation."
+        },
+        {
+          "id": "US-009",
+          "title": "Enable pgvector and create folders, notes, tags, and note_tags tables",
+          "description": "Create the core entity tables for folders, notes, tags, and note_tags with the fields and uniqueness constraints required by the spec.",
+          "acceptanceCriteria": [
+            "pgvector extension is enabled",
+            "folders has unique name and timestamps",
+            "notes contains the required core fields for content, status, errors, warnings, versioning, search_text, search_tsv, and embedding",
+            "tags stores normalized lowercase names",
+            "note_tags enforces uniqueness on (note_id, tag_id)"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec fixes folders as a flat list, tags as normalized lowercase values without spaces, and notes as the single source of current note state."
+        },
+        {
+          "id": "US-010",
+          "title": "Create assets and note_assets tables for file metadata and usage tracking",
+          "description": "Create the asset metadata table and the many-to-many usage table so uploaded images are tracked independently from note content and can be safely garbage-collected.",
+          "acceptanceCriteria": [
+            "assets stores only metadata fields defined in the spec",
+            "assets.storage_key is unique",
+            "note_assets enforces uniqueness on (note_id, asset_id)",
+            "The schema supports determining whether an asset is still used by any note"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Files live on disk in ./data/assets. The database stores metadata only. note_assets is mandatory for save synchronization, deletion, snapshotting, and Draft uploads."
+        },
+        {
+          "id": "US-011",
+          "title": "Create note_links for per-note extracted links",
+          "description": "Create the note_links table with per-note URL storage, normalization, link typing, and update timestamps.",
+          "acceptanceCriteria": [
+            "note_links contains id, note_id, url, normalized_url, link_type, created_at, and updated_at",
+            "link_type supports youtube_video, youtube_channel, web, text_file, and other",
+            "The schema can enforce or support unique (note_id, normalized_url) deduplication"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "Links are scoped to a specific note in MVP. Global shared link cache is explicitly not required."
+        },
+        {
+          "id": "US-012",
+          "title": "Create pipeline_runs for snapshot-based indexing runs",
+          "description": "Create pipeline_runs to represent exactly one indexing run per (note_id, index_version), including snapshot asset IDs, snapshot link IDs, snapshot hash, timing, and status fields.",
+          "acceptanceCriteria": [
+            "pipeline_runs exists with the fields fixed by the specification",
+            "Uniqueness is enforced on (note_id, index_version)",
+            "The table can store started_at, finished_at, total_duration_ms, stage_durations_ms, and processing_error"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "pipeline_runs is mandatory for race protection, snapshot validation, Ready/Error finalization, and timing logs."
+        },
+        {
+          "id": "US-013",
+          "title": "Create version-aware result tables for asset and link processing",
+          "description": "Create asset_processing_results and link_processing_results so every stage writes durable version-aware results tied to a specific pipeline run.",
+          "acceptanceCriteria": [
+            "asset_processing_results enforces unique (pipeline_run_id, asset_id)",
+            "link_processing_results enforces unique (pipeline_run_id, link_id)",
+            "Both tables store note_id and index_version so the current version can be queried efficiently",
+            "The schema supports warnings, statuses, and extracted/generated text fields from the spec"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Old processing results must never overwrite or replace the current note state. Finalization reads only current-run results."
+        },
+        {
+          "id": "US-014",
+          "title": "Implement all required indices and generated search columns",
+          "description": "Add the exact listing, relation, and search indices required by the specification, including the STORED generated RU+EN search_tsv column and its GIN index.",
+          "acceptanceCriteria": [
+            "notes has an index on (folder_id, updated_at, id)",
+            "notes.search_text exists as text NOT NULL DEFAULT ''",
+            "notes.search_tsv is a STORED generated column using to_tsvector('russian', coalesce(search_text,'')) || to_tsvector('english', coalesce(search_text,''))",
+            "A GIN index exists on notes.search_tsv",
+            "Indices exist on note_tags, note_assets, asset_processing_results(note_id, index_version), and link_processing_results(note_id, index_version)"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec forbids runtime to_tsvector calculation for search and forbids replacing RU+EN concatenation with a custom merged configuration or simple config."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic must follow the minimal-but-sufficient schema fixed in section 4.1.6 and the search constraints in section 4.7. Do not add unrelated entities or alternative search storage layouts."
+    },
+    {
+      "id": "EP-003",
+      "title": "Backend application skeleton, configuration, and API contracts",
+      "description": "Implement the FastAPI application foundation, layered backend structure, unified configuration via ENV, API DTOs, and structured logging required by the MVP.",
+      "acceptanceCriteria": [
+        "Backend code follows the api -> domain -> infra layer split from the specification",
+        "All required ENV names from the spec exist with reasonable defaults where allowed",
+        "API returns a unified JSON error format instead of raw FastAPI/Pydantic errors",
+        "Request correlation and structured logging are available for API and Celery execution paths"
+      ],
+      "userStories": [
+        {
+          "id": "US-015",
+          "title": "Create the FastAPI application skeleton using the required layered architecture",
+          "description": "Set up the backend entrypoint, dependency wiring, and module boundaries so routes live in app/api, business logic in app/domain, storage and clients in app/infra, and workers in app/workers.",
+          "acceptanceCriteria": [
+            "FastAPI app starts from backend/app",
+            "Routes, domain services, infrastructure code, and worker tasks are separated into the required folders",
+            "Worker code calls domain services instead of embedding business rules inside Celery tasks"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The architecture section explicitly fixes the api -> domain -> infra layering and the role of app/workers."
+        },
+        {
+          "id": "US-016",
+          "title": "Implement environment-driven configuration with all mandatory ENV names",
+          "description": "Create a configuration module that loads the exact ENV variables fixed by the specification, including model names, ports, fetch limits, feature flags, RRF parameters, Celery result backend, and Draft TTL.",
+          "acceptanceCriteria": [
+            "The backend can read all mandatory ENV names from the specification",
+            "Reasonable defaults exist where the spec allows them",
+            "Search, link fetch, model, and cleanup settings are configurable only via ENV"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "All limits and switches must come from ENV. Do not invent a separate config UI or file-based config as the primary source."
+        },
+        {
+          "id": "US-017",
+          "title": "Implement unified API error handling and ApiErrorDto responses",
+          "description": "Replace default raw framework validation/output errors with the fixed ApiErrorDto shape for validation and other API failures.",
+          "acceptanceCriteria": [
+            "Validation errors are returned as ApiErrorDto with code, message, and optional details",
+            "404, 409, 413, 415, 422, and 500 responses follow the unified JSON error format where applicable",
+            "The backend does not leak raw FastAPI/Pydantic error payloads"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Section 4.10.1 explicitly requires a single JSON error shape and forbids exposing raw default framework errors."
+        },
+        {
+          "id": "US-018",
+          "title": "Define the public request and response DTOs required by the MVP API",
+          "description": "Implement Pydantic schemas for TagRefDto, PaginatedResponse, AsyncAcceptedDto, NoteCardDto, NoteDetailDto, FolderDto, TagDto, AssetDto, and note/folder request payloads so the API contract is explicit.",
+          "acceptanceCriteria": [
+            "Public DTOs exist for all response shapes named in the specification",
+            "Paginated endpoints return items, total, limit, and offset",
+            "NoteCardDto and NoteDetailDto expose status and warning fields exactly as required"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec fixes the minimum DTO surface and the split between listing cards and note detail."
+        },
+        {
+          "id": "US-019",
+          "title": "Add request_id and task_id aware structured logging",
+          "description": "Implement structured logging for API and worker paths, carrying X-Request-Id through API work and task_id through Celery stages so note processing can be correlated end to end.",
+          "acceptanceCriteria": [
+            "API logs include request_id when available",
+            "Worker logs include task_id and note_id/index_version where relevant",
+            "The logging format supports later trace reconstruction for one note processing run"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec requires structured logs with request_id for API and task_id for Celery. Timing logs are implemented in the pipeline epic, not here."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic covers the non-feature-specific backend foundation. It must not implement alternative frameworks, alternative configuration mechanisms, or expose internal pipeline-only data as public API."
+    },
+    {
+      "id": "EP-004",
+      "title": "Folders, tags, assets, and note CRUD domain flows",
+      "description": "Implement the core backend CRUD and domain flows for folders, tags, assets, note creation, note reading, save, delete, and reindex entrypoints in line with the fixed REST API.",
+      "acceptanceCriteria": [
+        "All required CRUD/list endpoints from section 4.10.3 exist",
+        "Tag validation and normalization follow the exact naming rules from the spec",
+        "Note save synchronizes links and assets from content_json before deciding Draft vs Processing",
+        "Deleting notes and folders follows the exact reassignment and asset cleanup rules from the spec"
+      ],
+      "userStories": [
+        {
+          "id": "US-020",
+          "title": "Implement folder list, create, rename, and delete endpoints",
+          "description": "Implement GET/POST/PATCH/DELETE /api/folders so folders can be listed, created, renamed, and removed, with note reassignment to the unfiled state on delete.",
+          "acceptanceCriteria": [
+            "GET /api/folders returns folders sorted by name ascending and supports optional substring q",
+            "POST /api/folders creates a folder with unique name handling",
+            "PATCH /api/folders/{id} renames a folder",
+            "DELETE /api/folders/{id} moves existing notes to folder_id = null and returns 204"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Folders are a flat list only. Deleting a folder must not delete its notes."
+        },
+        {
+          "id": "US-021",
+          "title": "Implement tag validation and normalization rules in the backend",
+          "description": "Create backend validation logic for tag names so tags contain no spaces, allow only Latin/Cyrillic letters, digits, and underscore, and are normalized to lowercase before persistence.",
+          "acceptanceCriteria": [
+            "Invalid tag names are rejected by the backend",
+            "Valid tags are normalized to lowercase before save",
+            "Uniqueness is enforced on normalized tag name"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly says normalization happens on the backend, even if the frontend also mirrors it for UX."
+        },
+        {
+          "id": "US-022",
+          "title": "Implement GET /api/tags for sidebar and autocomplete data",
+          "description": "Implement the tag listing endpoint with optional substring search, pagination, and sorting rules based on notes_count and name.",
+          "acceptanceCriteria": [
+            "GET /api/tags returns PaginatedResponse[TagDto]",
+            "When q is empty, results are sorted by notes_count desc then name asc",
+            "When q is present, substring matches are prioritized before notes_count desc then name asc"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "Separate tag CRUD endpoints are not required in MVP. Tags are created through note save flows."
+        },
+        {
+          "id": "US-023",
+          "title": "Implement POST /api/notes to create an empty Draft note before editing",
+          "description": "Create the note creation endpoint that inserts a Draft note with minimal empty Tiptap content and returns NoteDetailDto.",
+          "acceptanceCriteria": [
+            "POST /api/notes returns 201 Created with a Draft note",
+            "A created Draft has id, timestamps, status=Draft, and empty or minimal content_json",
+            "The endpoint supports the required workflow where the frontend creates a note before uploading images"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The Draft workflow depends on creating a server-side note before the editor starts uploading assets."
+        },
+        {
+          "id": "US-024",
+          "title": "Implement GET /api/notes/{id} to return full note detail",
+          "description": "Implement note detail retrieval so the editor can load one note with its current content_json, tags, folder, status, warnings, and index_version.",
+          "acceptanceCriteria": [
+            "GET /api/notes/{id} returns NoteDetailDto",
+            "The response includes content_json, status, processing_error, has_warnings, warnings_count, processing_warnings, and index_version",
+            "404 is returned in the unified error format for unknown note IDs"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "This is the full editor-facing read contract. Internal pipeline state must not leak through the public DTO."
+        },
+        {
+          "id": "US-025",
+          "title": "Implement GET /api/notes base listing endpoint contract",
+          "description": "Implement the listing endpoint shape and basic filtering/pagination contract that the frontend uses for the main card grid. Search scoring internals are added in the search epic, but the endpoint contract and parameters belong here.",
+          "acceptanceCriteria": [
+            "GET /api/notes accepts q, folder_id, limit, and offset",
+            "The response shape is PaginatedResponse[NoteCardDto]",
+            "When q is empty after tag extraction, listing can return results sorted by updated_at desc, id desc"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Section 4.10.3 fixes the endpoint and parameters. Hybrid search ranking details are handled separately but must be served through this same endpoint."
+        },
+        {
+          "id": "US-026",
+          "title": "Implement PATCH /api/notes/{id} save flow up to pipeline entry",
+          "description": "Implement the note save endpoint so it validates tags, rebuilds content_text_flat, extracts links, synchronizes note_assets and note_links from content_json, decides whether the note is meaningful, and either keeps Draft or starts Processing.",
+          "acceptanceCriteria": [
+            "PATCH /api/notes/{id} accepts title, folder_id, tags, and content_json",
+            "Save rebuilds content_text_flat from content_json",
+            "Save extracts links from content_json",
+            "Save synchronizes note_assets and note_links before deciding status",
+            "Draft vs Processing behavior follows the exact meaningful-content rules from section 4.6.1",
+            "If the note remains Draft the endpoint returns 200 with NoteDetailDto; if processing starts it returns 202 with AsyncAcceptedDto"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "This task must not implement partial autosave or realtime status push. Save is explicit only."
+        },
+        {
+          "id": "US-027",
+          "title": "Implement DELETE /api/notes/{id} with safe relation and asset cleanup",
+          "description": "Implement permanent note deletion without a trash bin, including deletion of note relations, link/pipeline metadata, and removal of asset records/files only when they are no longer referenced through note_assets.",
+          "acceptanceCriteria": [
+            "DELETE /api/notes/{id} requires backend support for permanent deletion",
+            "All note_tags, note_links, and note_assets relations for the note are removed",
+            "Assets are removed from disk and from the assets table only if no note_assets references remain",
+            "The endpoint returns 204 No Content"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "MVP deletion is irreversible. Asset liveness is determined strictly via note_assets."
+        },
+        {
+          "id": "US-028",
+          "title": "Implement POST /api/notes/{id}/reindex as a separate manual entrypoint",
+          "description": "Implement manual reindexing so the frontend can explicitly request a new pipeline run for an existing note regardless of whether OCR/link/caption stages are enabled.",
+          "acceptanceCriteria": [
+            "Reindex increments index_version",
+            "Reindex sets status=Processing",
+            "Reindex starts the same orchestration entrypoint start_pipeline(note_id, index_version, request_id)",
+            "Reindex respects DISABLE_LINK_FETCH, DISABLE_OCR, and DISABLE_IMAGE_CAPTION while still rebuilding search-document and embeddings"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec requires a dedicated reindex button and endpoint. Reindex always rebuilds the index base, even if enrichment stages are disabled."
+        },
+        {
+          "id": "US-029",
+          "title": "Implement image upload and asset retrieval endpoints",
+          "description": "Implement POST /api/assets/image and GET /api/assets/{asset_id} so images can be uploaded only in the context of an existing note, saved to disk, and served back with correct content type.",
+          "acceptanceCriteria": [
+            "POST /api/assets/image requires multipart/form-data with note_id and file",
+            "Upload without note_id is rejected with 400",
+            "Only image/png, image/jpeg, and image/webp are accepted",
+            "File size is validated against MAX_IMAGE_MB",
+            "Successful upload stores the file under ./data/assets, creates an assets record, creates note_assets(note_id, asset_id), and returns AssetDto",
+            "GET /api/assets/{asset_id} returns the binary file with correct Content-Type"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Image uploads are allowed even while the note is still Draft. assetId, not data URL, is the source of truth in content_json."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic covers the public backend business surface exposed to the frontend. Search ranking internals, OCR, captioning, and link fetching are covered in separate epics."
+    },
+    {
+      "id": "EP-005",
+      "title": "Draft lifecycle, pipeline orchestration, race protection, and timing",
+      "description": "Implement the full note processing lifecycle: Draft handling, transition to Processing, snapshot-based race protection, Celery group/chord orchestration, finalization, error handling, warnings, retries, and TTL cleanup.",
+      "acceptanceCriteria": [
+        "Save and reindex can start exactly one pipeline run per new note version",
+        "All stages validate note_id + index_version + pipeline_run_id / snapshot membership before applying results",
+        "Only finalize_pipeline or pipeline_failed can move a note to Ready or Error",
+        "Draft cleanup runs periodically through Celery beat and removes expired empty Drafts plus orphaned assets"
+      ],
+      "userStories": [
+        {
+          "id": "US-030",
+          "title": "Implement meaningful-content detection and Draft preservation rules",
+          "description": "Create the domain rule that decides whether a saved note stays Draft or moves to Processing based on non-whitespace text, at least one asset, or at least one http/https link.",
+          "acceptanceCriteria": [
+            "A note becomes Processing only if it has non-whitespace content_text_flat or at least one linked asset or at least one http/https link",
+            "Otherwise the note remains Draft and no background pipeline is enqueued",
+            "The same rule is used for both new Draft notes and notes that are saved after being emptied"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Section 4.6.1 defines the exact Draft -> Processing criterion and explicitly forbids starting background work for empty Drafts."
+        },
+        {
+          "id": "US-031",
+          "title": "Implement Draft reset of derived search and processing fields when content becomes empty",
+          "description": "When a previously indexed note is saved back to an empty non-meaningful state, clear all current derived fields so stale indexed data does not remain searchable or visible.",
+          "acceptanceCriteria": [
+            "When a note returns to Draft, summary is cleared",
+            "When a note returns to Draft, search_text is cleared",
+            "When a note returns to Draft, embedding is set to NULL",
+            "When a note returns to Draft, processing_error is cleared and warnings are reset",
+            "Old version-aware processing tables may remain as history but no longer affect search or display"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly forbids 'ghost' old content remaining searchable after a note returns to Draft."
+        },
+        {
+          "id": "US-032",
+          "title": "Create pipeline_run snapshot records at the start of every Processing version",
+          "description": "When Save or Reindex starts Processing, create exactly one pipeline_runs row for the new (note_id, index_version), capture snapshot_asset_ids and snapshot_link_ids, compute snapshot_hash, and log note_processing_started.",
+          "acceptanceCriteria": [
+            "A pipeline_runs row is created for every new processing version",
+            "snapshot_asset_ids and snapshot_link_ids come from current note_assets and note_links",
+            "snapshot_hash is computed from the snapshot contents",
+            "note_processing_started is logged with note_id, index_version, request_id, and a measurable start time"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Snapshot creation is mandatory to prevent outdated background tasks from touching changed notes."
+        },
+        {
+          "id": "US-033",
+          "title": "Implement start_pipeline as the only orchestration entrypoint",
+          "description": "Implement start_pipeline(note_id, index_version, request_id) as the only task launched by the API, so it selects enabled stages and orchestrates them via group/chord or calls finalize_pipeline directly when no stages are enabled.",
+          "acceptanceCriteria": [
+            "API save and reindex enqueue only start_pipeline and do not invoke OCR/link/caption stages directly",
+            "start_pipeline checks note.index_version freshness before scheduling work",
+            "Enabled stages are selected according to content presence and DISABLE_* flags",
+            "If at least one stage exists, they run in parallel via group/chord; if none exist, finalize_pipeline is called directly"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly forbids the API from launching individual enrichment stages directly."
+        },
+        {
+          "id": "US-034",
+          "title": "Implement stage guards, snapshot membership checks, and small Celery payload policy",
+          "description": "Make every stage validate note.index_version, load the snapshot for pipeline_run_id, verify snapshot integrity, and only process objects that belong to the captured snapshot, while passing only small identifiers through Celery.",
+          "acceptanceCriteria": [
+            "Every stage validates note.index_version before doing work",
+            "Every stage validates snapshot index_version and snapshot_hash",
+            "Batch stages iterate only over snapshot_link_ids or snapshot_asset_ids, not over live tables",
+            "Object-specific work is skipped with skipped_reason='not_in_snapshot' when the object is not in the snapshot",
+            "Celery arguments/results do not contain content_json, OCR text, page HTML, embeddings, or other large payloads"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The specification is explicit that Redis is only for commands and small service results, not for carrying processing payloads."
+        },
+        {
+          "id": "US-035",
+          "title": "Implement finalize_pipeline as the only Ready transition and final index writer",
+          "description": "Implement finalize_pipeline(note_id, index_version, request_id, stage_results) so it reads current-run durable stage results, builds final search_text, writes tsvector-backed data, recalculates embedding, generates the final summary, clears processing_error, sets status=Ready, and logs note_processing_finished.",
+          "acceptanceCriteria": [
+            "finalize_pipeline validates the current note version before applying results",
+            "Final search_text is built from current durable stage outputs, not from Celery result payloads",
+            "Embedding is recalculated and validated to exactly 1024 dimensions before save",
+            "Final summary is generated from the full search-document in non-thinking mode",
+            "status becomes Ready only in finalize_pipeline",
+            "note_processing_finished includes total_duration_ms and stage_durations_ms where available"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The final summary must be based on search_text but search_text must not be rebuilt again from summary, preventing a cyclic dependency."
+        },
+        {
+          "id": "US-036",
+          "title": "Implement pipeline_failed and critical/non-critical error classification",
+          "description": "Implement the error callback and classification rules so critical failures move the note to Error with a short processing_error, while non-critical per-link or per-image failures become warnings and still allow Ready when the base index is valid.",
+          "acceptanceCriteria": [
+            "pipeline_failed validates index_version before changing note state",
+            "Critical failures set status=Error and populate processing_error",
+            "Non-critical failures are stored in processing_warnings with has_warnings=true and warnings_count>0",
+            "A note may still become Ready with warnings when final search_text, embedding, and state save succeed"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Examples of non-critical failures are individual link fetch, OCR, caption, or link summary failures. Examples of critical failures are inability to build search_document, write embedding, or finalize the pipeline."
+        },
+        {
+          "id": "US-037",
+          "title": "Implement Celery retry policy exactly as specified",
+          "description": "Configure retries so network tasks get 3 attempts total and OCR/caption tasks get 2 attempts total, with exponential backoff where required, and exhausted retries flow into warning or Error handling depending on stage criticality.",
+          "acceptanceCriteria": [
+            "Link-processing tasks use 3 total attempts with exponential delay",
+            "OCR and image caption tasks use 2 total attempts",
+            "After retries are exhausted, non-critical stage failures are downgraded to warnings and the pipeline continues when allowed",
+            "Critical failures after retries can still move the note to Error through pipeline_failed/finalization"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The retry counts are explicitly fixed in the architecture section and must not be replaced with generic defaults."
+        },
+        {
+          "id": "US-038",
+          "title": "Implement periodic Draft TTL cleanup through celery beat",
+          "description": "Create the periodic cleanup task and beat schedule that once every 24 hours deletes expired empty Draft notes, removes their relations, and removes assets that are no longer referenced anywhere.",
+          "acceptanceCriteria": [
+            "Celery beat triggers Draft cleanup periodically",
+            "Cleanup uses DRAFT_TTL_HOURS and the exact empty-Draft criteria from the specification",
+            "Cleanup deletes Draft notes, note_assets, and note_links as required",
+            "Cleanup deletes only assets that are unused after note deletion",
+            "Cleanup logs candidate count, deleted Draft count, deleted asset count, and deletion errors if any"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Periodic tasks must not be scheduled by the backend process. The spec explicitly requires celery beat for TTL cleanup."
+        },
+        {
+          "id": "US-039",
+          "title": "Implement fast post-save summary generation and title autogeneration fallback behavior",
+          "description": "Implement the fast summary generation path and optional title generation behavior that run around the pipeline while respecting the spec's non-thinking requirement for all summarization and the warning-only policy for title generation failure.",
+          "acceptanceCriteria": [
+            "A fast summary can be generated immediately after Save from title/content_text_flat/tags",
+            "Fast summary generation uses qwen3.5:9b in non-thinking mode",
+            "If title is empty, title generation is attempted without blocking successful finalization",
+            "If title generation fails, fallback uses the first non-empty line truncated to a reasonable length when available, otherwise title may remain empty",
+            "Title generation failure is recorded as a processing warning, not a fatal error"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "All summarization tasks must explicitly disable thinking/reasoning. Title generation is separate from summary generation and is explicitly non-fatal."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic covers the heart of the backend behavior fixed in sections 4.4, 4.4.2, 4.4.3, and 4.6.1. It must preserve version safety and the distinction between critical errors and non-critical warnings."
+    },
+    {
+      "id": "EP-006",
+      "title": "Image OCR/caption and secure link processing",
+      "description": "Implement the background enrichment stages for note images and note links, including OCR, image captioning, SSRF-safe HTTP fetching, YouTube Data API handling, and per-link/per-asset warning behavior.",
+      "acceptanceCriteria": [
+        "All image processing results are persisted per pipeline run and can contribute to the final search-document",
+        "All link processing is restricted to public http/https resources and follows the exact SSRF rules from the specification",
+        "YouTube video and channel links use YouTube Data API v3 as the primary metadata source",
+        "Per-object failures degrade to warnings when they do not block final index construction"
+      ],
+      "userStories": [
+        {
+          "id": "US-040",
+          "title": "Implement the process_ocr stage for all snapshot assets",
+          "description": "Implement one stage that iterates over snapshot_asset_ids, runs PaddleOCR on each image, saves full OCR text into asset_processing_results, and returns only a small stage result payload.",
+          "acceptanceCriteria": [
+            "process_ocr reads only assets from the captured snapshot",
+            "OCR text for each asset is persisted to the durable result table",
+            "The stage result payload contains only small service fields such as stage_name, status, duration_ms, and skipped",
+            "OCR failure for one asset does not abort processing of other assets"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "OCR is explicitly required for every image and its output participates in both lexical and semantic search through search_text."
+        },
+        {
+          "id": "US-041",
+          "title": "Implement the process_image_caption stage for all snapshot assets",
+          "description": "Implement one stage that iterates over snapshot_asset_ids, generates a short meaningful 1–3 sentence caption for each image using the local vision model, and persists the result.",
+          "acceptanceCriteria": [
+            "process_image_caption reads only snapshot assets",
+            "Caption text is persisted per asset and per pipeline run",
+            "Captions are short meaningful descriptions of 1–3 sentences",
+            "Caption failure for one asset becomes a warning and does not abort the whole pipeline"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec fixes qwen3.5:9b as the local vision model set and requires image captions to contribute to search."
+        },
+        {
+          "id": "US-042",
+          "title": "Implement link extraction and classification from note content",
+          "description": "Create backend logic that extracts links from content_json during Save and classifies each link as youtube_video, youtube_channel, web, text_file, or other before background processing.",
+          "acceptanceCriteria": [
+            "Save extracts links from content_json",
+            "Each extracted link is normalized and classified into one of the required link_type values",
+            "Only http/https links are eligible for background fetch processing",
+            "Per-note duplicate normalized URLs can be avoided or collapsed according to the schema rule"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "Link extraction happens before the pipeline starts because note_links is part of the snapshot. User-entered links may exist as plain text or as link marks."
+        },
+        {
+          "id": "US-043",
+          "title": "Implement an SSRF-safe link fetcher with scheme, DNS, redirect, port, size, and timeout enforcement",
+          "description": "Create the network fetcher used by link stages so it allows only public http/https resources on ports 80/443, resolves DNS before requests, blocks private/local IPv4 and IPv6 ranges, re-checks every redirect, streams responses with size limits, and enforces connect/read timeouts.",
+          "acceptanceCriteria": [
+            "Only http and https schemes are accepted",
+            "Only ports 80 and 443 are accepted",
+            "DNS resolution is performed before fetch and local/private/loopback/link-local/unique-local addresses are rejected for IPv4 and IPv6",
+            "Redirects are limited by LINK_MAX_REDIRECTS and revalidated on every hop",
+            "Response bodies are streamed and aborted after MAX_LINK_RESPONSE_MB",
+            "Connect/read timeout follows LINK_FETCH_TIMEOUT_SEC"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "This is a hard security requirement. The spec explicitly forbids localhost/private-range access even through redirects."
+        },
+        {
+          "id": "US-044",
+          "title": "Implement YouTube video metadata retrieval through YouTube Data API v3",
+          "description": "When a note link is a YouTube video, fetch structured metadata through YouTube Data API v3 and persist the required fields so they can be summarized and indexed.",
+          "acceptanceCriteria": [
+            "Video links use YouTube Data API v3 as the primary source instead of HTML scraping",
+            "Persisted video metadata includes video_id, channel_id, channel_title, title, description, published_at, duration, thumbnails, category_id, live_broadcast_content, and available language/statistics fields where provided by the API",
+            "Structured video metadata is available for final note indexing and link summary generation"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly requires YouTube Data API v3 and expanded metadata, not just title plus author."
+        },
+        {
+          "id": "US-045",
+          "title": "Implement YouTube channel metadata retrieval and fallback behavior",
+          "description": "When a note link is a YouTube channel, fetch channel metadata through YouTube Data API v3; if the API is temporarily unavailable, allow fallback to generic web handling without treating fallback as the primary path.",
+          "acceptanceCriteria": [
+            "Channel links use YouTube Data API v3 as the primary metadata source",
+            "Persisted channel metadata includes channel_id, title, description, published_at, and thumbnails",
+            "If the API is temporarily unavailable, generic web processing may be used as fallback and does not redefine the main design"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec allows fallback to ordinary web handling only as a backup scenario for temporary API unavailability."
+        },
+        {
+          "id": "US-046",
+          "title": "Implement text-file link processing with size limits and summary generation",
+          "description": "For text-like links detected by content type or extension, download text content up to MAX_TEXT_FILE_MB, persist extracted text, and generate a short meaningful summary suitable for indexing.",
+          "acceptanceCriteria": [
+            "text/* content types or recognized text file extensions are handled as text-file links",
+            "Text download respects MAX_TEXT_FILE_MB",
+            "Extracted text is persisted for indexing",
+            "If an LLM is used to create the summary, qwen3.5:9b runs in non-thinking mode"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec allows heuristic or LLM summary for text files, but the output must be meaningful text for search."
+        },
+        {
+          "id": "US-047",
+          "title": "Implement generic webpage processing with main-text extraction and link summary",
+          "description": "For ordinary public web pages, fetch the page, extract page title and main text with trafilatura or readability-lxml, and generate a short meaningful summary/description for indexing.",
+          "acceptanceCriteria": [
+            "Page title and extracted main text are persisted for processed web links",
+            "Main text extraction uses the allowed main-content extraction libraries from the specification",
+            "A short meaningful summary/description is generated for indexing",
+            "If the summary is LLM-generated, qwen3.5:9b runs in non-thinking mode"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The stack section explicitly fixes trafilatura/readability-lxml for web-page main-text extraction."
+        },
+        {
+          "id": "US-048",
+          "title": "Persist per-object warnings for non-critical link and image failures",
+          "description": "Whenever a single asset or single link fails processing without blocking final index construction, persist a structured warning with stage, target, code, message, and retryable so the UI can show Ready-with-warnings.",
+          "acceptanceCriteria": [
+            "Warnings are stored in the note-level processing_warnings JSON/jsonb structure",
+            "Each warning item contains stage, target, code, message, and retryable",
+            "Single-link and single-image failures can still lead to final status Ready when the base index succeeds"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The recommended warning payload shape is explicitly fixed in the architecture section."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic covers enrichment only. It must not change the public API shape or bypass the snapshot/version rules from the pipeline epic."
+    },
+    {
+      "id": "EP-007",
+      "title": "Hybrid search, search-document construction, and scoring",
+      "description": "Implement the backend search system: query parsing, search-document construction, RU+EN FTS, vector search, RRF fusion, stable sorting, and GET /api/notes search behavior.",
+      "acceptanceCriteria": [
+        "The backend can parse #tags and free text from q exactly as specified",
+        "The current note search index is built from search_text plus generated search_tsv and vector embedding",
+        "Hybrid search fuses FTS and vector results using RRF with RRF_K=60 and RRF_TOPN",
+        "limit/offset pagination is applied only after the final fused ranking is computed and tie-broken by updated_at and id"
+      ],
+      "userStories": [
+        {
+          "id": "US-049",
+          "title": "Implement q parsing for free text and #tag filters",
+          "description": "Parse the GET /api/notes q parameter so all valid #tag tokens are extracted using the tag naming rules, the remaining text becomes the free-text search query, and multiple tags behave as AND filters.",
+          "acceptanceCriteria": [
+            "All valid #tag tokens are extracted from q",
+            "The remaining text after tag removal is used as the free-text query",
+            "If only tags remain, listing works as tag-filtered note retrieval sorted by updated_at desc, id desc",
+            "Multiple tags are applied with AND semantics"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The frontend search field is intentionally simple; all parsing and semantics are handled on the backend."
+        },
+        {
+          "id": "US-050",
+          "title": "Implement search-document construction without summary feedback loops",
+          "description": "Create the function that builds search_text from note title, content_text_flat, tags, OCR text, image captions, page titles, extracted link text, and other link-derived text fields while explicitly excluding note.summary.",
+          "acceptanceCriteria": [
+            "search_text includes the note and enrichment fields named in the specification",
+            "note.summary is not included in search_text",
+            "search_text is updated once in the fast phase and rebuilt again in finalization after enrichment",
+            "Final summary is generated from the completed search_text but does not trigger another search_text rebuild"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The specification explicitly forbids cyclic search_text -> summary -> search_text behavior."
+        },
+        {
+          "id": "US-051",
+          "title": "Implement embedding generation and dimensionality validation for search_text",
+          "description": "Generate note embeddings from search_text using bge-m3, store them in VECTOR(1024), and reject or mark indexing as failed if the embedding length is not exactly 1024.",
+          "acceptanceCriteria": [
+            "Embeddings are generated from search_text, not from note.summary",
+            "Stored embeddings contain exactly 1024 values",
+            "An invalid embedding length is treated as an indexing error",
+            "Embeddings are rebuilt on finalization and on reindex"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec fixes the embedding model to bge-m3 and the database dimension to VECTOR(1024)."
+        },
+        {
+          "id": "US-052",
+          "title": "Implement RU+EN full-text querying using the stored generated search_tsv column",
+          "description": "Implement lexical search so all runtime FTS uses the stored search_tsv column and an RU+EN tsquery built as websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q).",
+          "acceptanceCriteria": [
+            "FTS queries use notes.search_tsv and do not recompute to_tsvector on the fly",
+            "The tsquery follows the fixed RU+EN websearch_to_tsquery concatenation pattern",
+            "The lexical rank is computed against the same RU+EN document/query configuration",
+            "The backend does not switch to simple config or a custom merged config"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The full-text pattern is explicitly fixed in the specification and must be used consistently in all queries."
+        },
+        {
+          "id": "US-053",
+          "title": "Implement vector candidate retrieval without ANN indexes",
+          "description": "Implement semantic candidate retrieval by embedding the text query and selecting the top vector matches from the filtered note set using pgvector, without HNSW or IVFFlat in MVP.",
+          "acceptanceCriteria": [
+            "The query text is embedded for semantic search when q has non-empty free text",
+            "Vector retrieval operates on notes.embedding with the fixed 1024-dimensional operator setup",
+            "No ANN index type such as HNSW or IVFFlat is introduced for MVP"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The specification explicitly says semantic search in MVP works without ANN indexes."
+        },
+        {
+          "id": "US-054",
+          "title": "Implement RRF score fusion, stable sorting, and final pagination",
+          "description": "Fuse the FTS and vector candidate lists using Reciprocal Rank Fusion with the exact formula and parameters from the specification, then apply stable sorting and only then apply limit/offset pagination.",
+          "acceptanceCriteria": [
+            "RRF score uses 1 / (k + rank_fts) + 1 / (k + rank_vec) with RRF_K",
+            "Both FTS and vector candidates are preselected with the same RRF_TOPN value after folder/tag filters are applied",
+            "Missing presence in one list contributes 0 from that list",
+            "Final sort order is score desc, then updated_at desc, then id desc",
+            "Pagination is applied only after candidate union, score calculation, and final sorting"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The specification explicitly rejects page-local normalization and requires RRF to stay stable across pages."
+        },
+        {
+          "id": "US-055",
+          "title": "Complete GET /api/notes search behavior for all query shapes",
+          "description": "Finish GET /api/notes so it supports plain listing, tag-only filtering, and hybrid text search with score in the same endpoint and response contract.",
+          "acceptanceCriteria": [
+            "With empty q after tag extraction, GET /api/notes returns the normal listing sorted by updated_at desc, id desc",
+            "With non-empty free-text q, GET /api/notes returns hybrid search results with score",
+            "folder_id and tag filters are applied before candidate retrieval",
+            "Results are returned as PaginatedResponse[NoteCardDto] with total, limit, and offset"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec fixes one endpoint for listing and search, not separate APIs for each mode."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes."
+    },
+    {
+      "id": "EP-008",
+      "title": "Frontend shell, main screen, sidebar, and card grid",
+      "description": "Implement the React/Vite main workspace with the fixed layout: top global search, left sidebar for folders and tags, main grid of note cards, plus-card creation, and paginated loading from the backend.",
+      "acceptanceCriteria": [
+        "The main UI layout matches the spec: search on top, folders/tags on the left, cards in the center",
+        "The sidebar can search folders/tags by substring and can be collapsed/expanded",
+        "The note grid shows title, summary, tags, main status, and warning indicator where applicable",
+        "Pagination is supported for listing and search with the backend limit/offset API"
+      ],
+      "userStories": [
+        {
+          "id": "US-056",
+          "title": "Create the frontend application shell with Sematrix branding",
+          "description": "Build the top-level React app shell for the MVP and include the fixed app name Sematrix and the provided brain_logo.png branding asset where appropriate in the interface.",
+          "acceptanceCriteria": [
+            "The frontend displays the Sematrix name in the application shell",
+            "The provided brain_logo.png asset is incorporated into the UI branding",
+            "The shell structure supports the fixed top search / left sidebar / main content layout"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec names the product Sematrix and explicitly points to brain_logo.png. This task should use that branding without inventing additional branding assets or flows."
+        },
+        {
+          "id": "US-057",
+          "title": "Implement the top global search bar and request wiring to GET /api/notes",
+          "description": "Create the main search input at the top of the page and wire it to the backend listing/search endpoint while preserving the raw q string, including #tags typed by the user.",
+          "acceptanceCriteria": [
+            "The top bar sends q, folder_id, limit, and offset to GET /api/notes",
+            "The field accepts free-form text and raw #tag tokens",
+            "The frontend does not parse score or tags itself beyond basic display concerns"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The search field is intentionally free-form; parsing and ranking are backend responsibilities."
+        },
+        {
+          "id": "US-058",
+          "title": "Implement the collapsible left sidebar with folder and tag sections",
+          "description": "Build a sidebar that lists folders and tags, can be collapsed or expanded, and includes a separate substring search input for folders/tags without AI behavior.",
+          "acceptanceCriteria": [
+            "Sidebar can be collapsed and expanded",
+            "Folders and tags are shown in separate sections",
+            "A local substring search input filters sidebar folder/tag lists",
+            "The sidebar does not perform semantic search"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "Section 4.2 explicitly distinguishes the sidebar substring search from the main semantic/global search."
+        },
+        {
+          "id": "US-059",
+          "title": "Implement sidebar interactions for folder selection and tag click-to-search",
+          "description": "Make folder selection constrain the current note grid and search scope, and make clicking a tag in the sidebar place that tag into the main search field as if the user typed #tag manually.",
+          "acceptanceCriteria": [
+            "Selecting a folder constrains the note listing/search scope to that folder",
+            "Clicking a sidebar tag injects the tag into the main search field in #tag form",
+            "Folder and tag interactions refresh the note grid through the backend API"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "Tag click semantics are explicitly defined in the spec; the UI should behave exactly like manual #tag input."
+        },
+        {
+          "id": "US-060",
+          "title": "Implement the main note grid with paginated NoteCard rendering",
+          "description": "Render the main center grid of note cards using NoteCardDto data from the backend and support loading pages with limit/offset.",
+          "acceptanceCriteria": [
+            "Cards render title, summary or truncated fragment, tags, updated time if desired, and status",
+            "Listing and search can move through pages using the backend's limit/offset model",
+            "The frontend uses the backend total field to support pagination controls"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The backend owns ranking and filtering. The frontend only renders paginated results."
+        },
+        {
+          "id": "US-061",
+          "title": "Implement the primary plus-card for note creation",
+          "description": "Make the first card in the grid a primary-style '+' entry that creates a new Draft via POST /api/notes and then opens the note editor.",
+          "acceptanceCriteria": [
+            "The first card is visually distinct as the add-note action",
+            "Clicking the card creates a Draft note through the backend",
+            "The user is redirected to the editor for the created note"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "This behavior is required by the Draft asset-upload workflow because the editor needs a note_id before image uploads."
+        },
+        {
+          "id": "US-062",
+          "title": "Show status badges and warning indicators on note cards",
+          "description": "Display the main indexing status on each card and a separate warning indicator when status is Ready and the note has processing warnings.",
+          "acceptanceCriteria": [
+            "Cards show Draft, Processing, Ready, or Error status clearly",
+            "When a note is Ready and has_warnings=true, the card also shows a warning indicator such as Ready with warnings or an icon",
+            "The frontend uses backend status/warning fields and does not infer processing state locally"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly distinguishes main status from warning state and requires the UI to show both."
+        },
+        {
+          "id": "US-063",
+          "title": "Refresh actual status through normal REST reads after page reload",
+          "description": "Implement page loading and refresh behavior so the UI shows the actual persisted note statuses after normal API reads, without SSE or WebSocket updates.",
+          "acceptanceCriteria": [
+            "Reloading the page re-requests note list and note detail data from REST endpoints",
+            "The UI shows persisted Draft/Processing/Ready/Error states after reload",
+            "No realtime push mechanism such as SSE or WebSocket is introduced in MVP"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec explicitly says realtime push is not required and the accepted behavior is status refresh on normal page reload/request."
+        }
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This epic covers the user-facing application shell and browsing workflow. Search logic remains backend-driven; the frontend only sends input and renders results."
+    },
+    {
+      "id": "EP-009",
+      "title": "Note editor, Tiptap behavior, image nodes, and note actions",
+      "description": "Implement the note detail screen and Tiptap-based editor with the exact MVP feature set: rich text, inline images via assetId, links, tags, folder selection, Save/Delete/Reindex, and #tag auto-conversion with undo behavior.",
+      "acceptanceCriteria": [
+        "The editor supports the exact minimum Tiptap feature set from the specification",
+        "Image nodes persist assetId as the source of truth and are uploaded through the backend",
+        "Tags can be managed manually and also via #tag auto-conversion from normal text",
+        "Save, Delete, and Reindex actions call the backend contracts fixed by the specification"
+      ],
+      "userStories": [
+        {
+          "id": "US-064",
+          "title": "Implement the note detail screen and backend data loading flow",
+          "description": "Create the note editor page that loads one note through GET /api/notes/{id}, shows title, folder selector, tag controls, editor content, current status, warnings, and action buttons.",
+          "acceptanceCriteria": [
+            "The note page loads NoteDetailDto from the backend",
+            "The screen shows title, summary if needed, folder_id selection, tags, content_json-backed editor, status, warnings, Save, Delete, and Reindex controls",
+            "Unknown note IDs are handled gracefully via the backend error response"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The editor page is the main workspace for one note. It must use the public API only."
+        },
+        {
+          "id": "US-065",
+          "title": "Configure Tiptap with the exact minimum editor feature set",
+          "description": "Set up Tiptap to support paragraphs, bold, italic, lists, links, inline images, code blocks, headings, and block quotes, and no broader editor scope is required for MVP.",
+          "acceptanceCriteria": [
+            "Tiptap supports paragraphs, bold, italic, lists, links, inline images, code blocks, headings, and block quotes",
+            "The editor serializes back to content_json",
+            "Unsupported extra editor features are not required to satisfy MVP"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly fixes the minimum supported Tiptap feature set."
+        },
+        {
+          "id": "US-066",
+          "title": "Implement inline image insertion with drag-drop, paste, and upload button",
+          "description": "Add all three image insertion flows so the frontend uploads the image to the backend with note_id, receives AssetDto, and inserts an image node referencing assetId into content_json.",
+          "acceptanceCriteria": [
+            "Drag-drop image insertion works",
+            "Clipboard paste image insertion works",
+            "Manual upload button insertion works",
+            "The inserted image node stores assetId as the mandatory source of truth",
+            "The rendered image can use /api/assets/{assetId} as src but data URLs are not stored in content_json"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec is explicit that assetId is required in the node and data URLs must not be the source of truth."
+        },
+        {
+          "id": "US-067",
+          "title": "Render inline note images from backend asset URLs",
+          "description": "Display image nodes inline inside the note body so text can continue before and after the image while the image content is served from the backend asset endpoint.",
+          "acceptanceCriteria": [
+            "Inline images render inside the text flow",
+            "Users can continue typing before and after images",
+            "Image rendering resolves the uploaded asset through the backend asset route"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "This is the user-visible half of the assetId-based image model defined by the spec."
+        },
+        {
+          "id": "US-068",
+          "title": "Implement manual tag management UI on the note screen",
+          "description": "Build a dedicated tags block with chips and input so users can add and remove valid tags independent of note body content.",
+          "acceptanceCriteria": [
+            "The note screen includes a dedicated tag chips + input area",
+            "Users can add valid tags manually",
+            "Users can remove existing tags manually",
+            "The UI respects backend normalization/validation rules"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The tags block is required separately from text auto-conversion. Tags are created on first use."
+        },
+        {
+          "id": "US-069",
+          "title": "Implement #tag auto-conversion from normal editor text as one undo transaction",
+          "description": "When the user types a valid #tag token in ordinary text and completes it with whitespace, Enter, or punctuation, remove it from the text, add the normalized tag to the note tag list, move focus to the tag input, and make the entire conversion one Tiptap undo transaction.",
+          "acceptanceCriteria": [
+            "Auto-conversion triggers only in normal text, not inside links or code",
+            "The original #tag token is removed from the text",
+            "The normalized tag is added to the note tag list",
+            "Focus moves to the tag input after conversion",
+            "The whole conversion is one undo transaction in Tiptap"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "This behavior is explicitly defined step by step in section 4.3 and must not be implemented as multiple independent undo actions."
+        },
+        {
+          "id": "US-070",
+          "title": "Implement Ctrl+Z and Backspace rollback for tag auto-conversion",
+          "description": "Support full rollback of the last auto-conversion so Ctrl+Z restores the original text token and removes the created tag, and Backspace immediately after focus transfer does the same when the tag input is empty.",
+          "acceptanceCriteria": [
+            "Ctrl+Z fully restores the original #tag text in its original place and removes the tag from the list",
+            "Backspace in an empty tag input immediately after focus transfer performs the same rollback",
+            "Rollback behavior is limited to the latest auto-conversion flow described in the spec"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly requires both undo paths and ties them to the one-transaction Tiptap implementation."
+        },
+        {
+          "id": "US-071",
+          "title": "Implement Save, Delete with confirm, and Reindex actions on the note screen",
+          "description": "Wire the editor actions to the backend contracts so Save uses PATCH /api/notes/{id}, Delete asks for confirmation and then calls DELETE /api/notes/{id}, and Reindex calls POST /api/notes/{id}/reindex.",
+          "acceptanceCriteria": [
+            "Save sends title, folder_id, tags, and content_json to the backend",
+            "Delete requires explicit user confirmation before the backend call",
+            "Reindex triggers the backend endpoint and refreshes displayed note status accordingly",
+            "The frontend handles 200 Draft and 202 Processing responses from Save correctly"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly requires Delete confirmation and a separate Reindex action."
+        },
+        {
+          "id": "US-072",
+          "title": "Display current status, processing error, and warning details on the note screen",
+          "description": "Show the note's current processing state and make processing_error or processing_warnings visible to the user using the note detail payload.",
+          "acceptanceCriteria": [
+            "The note screen displays Draft, Processing, Ready, or Error based on NoteDetailDto",
+            "If processing_error is present, it is shown in a user-visible way",
+            "If processing_warnings exist, the screen shows that warnings are present and can present their details or summary"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The backend stores warning structures specifically so the UI can surface them. Exact styling is flexible, but the information must be available."
+        }
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec."
+    },
+    {
+      "id": "EP-010",
+      "title": "Backup, restore, and project documentation",
+      "description": "Implement the user-facing operational artifacts required by the spec: backup/restore scripts and a README that explains startup, local access, models, storage, and troubleshooting.",
+      "acceptanceCriteria": [
+        "scripts/backup.sh creates reproducible backups containing pg_dump output plus ./data/assets",
+        "scripts/restore.sh restores from a selected archive and can replace current data as documented",
+        "README explains startup, ports, model initialization, data paths, backup/restore, troubleshooting, and localhost-only access"
+      ],
+      "userStories": [
+        {
+          "id": "US-073",
+          "title": "Implement scripts/backup.sh for database plus asset backups",
+          "description": "Create a backup script that writes timestamped archives under ./backups and includes a PostgreSQL dump together with the ./data/assets directory.",
+          "acceptanceCriteria": [
+            "scripts/backup.sh creates a backup archive under ./backups",
+            "The archive includes a pg_dump export",
+            "The archive includes ./data/assets",
+            "The script is usable in the documented local Docker-based environment"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec explicitly excludes ./data/ollama from backups because models are treated as cache."
+        },
+        {
+          "id": "US-074",
+          "title": "Implement scripts/restore.sh for destructive restore from a selected archive",
+          "description": "Create a restore script that restores application state from one chosen backup archive and clearly overwrites the current data as warned by the spec.",
+          "acceptanceCriteria": [
+            "scripts/restore.sh restores the PostgreSQL dump from a selected backup",
+            "scripts/restore.sh restores ./data/assets from the archive",
+            "The destructive nature of restore is made clear in behavior and documentation"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The restore path must be understandable and reproducible for the end user."
+        },
+        {
+          "id": "US-075",
+          "title": "Write README.md for local startup, operation, and troubleshooting",
+          "description": "Document how to start the full stack, where the UI/API open, how models are pulled automatically, where data lives, how to run backup/restore, common problems such as missing GPU or model pull failure, and the localhost-only/no-auth nature of the app.",
+          "acceptanceCriteria": [
+            "README shows docker compose up --build as the main startup command",
+            "README documents UI and API URLs",
+            "README explains automatic model pulling and the ./data layout",
+            "README documents backup and restore commands",
+            "README includes troubleshooting for missing GPU / model pull issues",
+            "README explicitly notes 127.0.0.1 local-only access and the absence of authentication"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec explicitly lists the README topics that must be covered."
+        }
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "These artifacts are part of the required deliverable. They must be simple and reproducible for a home-machine localhost deployment."
+    },
+    {
+      "id": "EP-011",
+      "title": "Unit and integration test coverage for MVP behavior",
+      "description": "Implement automated unit and integration tests for the required behaviors called out in the specification, and extend coverage to all implemented functionality without adding e2e tests.",
+      "acceptanceCriteria": [
+        "The test suite contains unit and integration tests only",
+        "Core parsing, validation, search, and classification rules are covered by unit tests",
+        "API, Draft/Processing transitions, orchestration entrypoints, pipeline safety, and cleanup behavior are covered by integration tests",
+        "No e2e/browser test layer is introduced as a required deliverable"
+      ],
+      "userStories": [
+        {
+          "id": "US-076",
+          "title": "Add unit tests for query parsing, tag validation, and search-document building",
+          "description": "Write unit tests for extracting #tags and remaining query text, validating tag names, and building search_text from note/enrichment data while excluding summary.",
+          "acceptanceCriteria": [
+            "Unit tests cover query parser behavior for mixed text and #tags",
+            "Unit tests cover the allowed/forbidden tag character rules",
+            "Unit tests verify search_text composition and confirm that note.summary is excluded"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "These exact unit test themes are explicitly listed in the specification."
+        },
+        {
+          "id": "US-077",
+          "title": "Add unit tests for link classification and RRF scoring behavior",
+          "description": "Write unit tests for classifying links by URL/content type and for RRF score calculation and tie handling across FTS-only, vector-only, and dual-presence notes.",
+          "acceptanceCriteria": [
+            "Unit tests cover youtube video, youtube channel, text file, generic web, and other classification",
+            "Unit tests cover RRF scoring when a note appears in both lists",
+            "Unit tests cover RRF scoring when a note appears only in one list",
+            "Unit tests verify stable ordering when scores are equal",
+            "Unit tests verify that RRF results do not depend on page limit/offset"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The spec explicitly names these ranking/classification tests as required."
+        },
+        {
+          "id": "US-078",
+          "title": "Add unit tests for pipeline critical vs non-critical error classification",
+          "description": "Write unit tests that prove per-object OCR/link/caption failures can downgrade to warnings while true base-index/finalization failures remain fatal.",
+          "acceptanceCriteria": [
+            "Unit tests cover critical vs non-critical classification decisions",
+            "Unit tests verify non-critical failures map to warnings rather than Error when allowed",
+            "Unit tests verify critical failures remain fatal and lead to Error behavior"
+          ],
+          "priority": 2,
+          "passes": false,
+          "notes": "The spec explicitly lists classification of pipeline errors as a required unit-test area."
+        },
+        {
+          "id": "US-079",
+          "title": "Add integration tests for save, Draft/Processing transitions, listing, filtering, and reindex entrypoints",
+          "description": "Write integration tests around the REST API and domain logic to verify note creation, save behavior, meaningful-content detection, pagination, folder/tag filtering, and reindex API behavior with DISABLE_* flags.",
+          "acceptanceCriteria": [
+            "Integration tests verify a saved note appears in GET /api/notes",
+            "Integration tests verify limit/offset pagination",
+            "Integration tests verify folder and tag filtering",
+            "Integration tests verify PATCH /api/notes/{id} returns Draft without enqueuing work for empty content",
+            "Integration tests verify PATCH /api/notes/{id} starts Processing for meaningful content",
+            "Integration tests verify POST /api/notes/{id}/reindex updates status and respects DISABLE_* flags"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "These exact integration scenarios are explicitly listed in section 8."
+        },
+        {
+          "id": "US-080",
+          "title": "Add integration tests for orchestration, race protection, warnings, cleanup, and failure handling",
+          "description": "Write integration tests to verify only start_pipeline is enqueued by API calls, stage orchestration and direct finalization rules, outdated-version safety, pipeline_failed Error transitions, small stage payloads, warning-only non-critical failures, and Draft TTL cleanup behavior.",
+          "acceptanceCriteria": [
+            "Integration tests verify Save/Reindex enqueue start_pipeline rather than individual stages",
+            "Integration tests verify finalize_pipeline is called once after multiple stages and directly when all stages are disabled",
+            "Integration tests verify stale index_version results do not mutate the note",
+            "Integration tests verify a fatal exhausted-retry stage leads to Error with processing_error and the note is not left in Processing",
+            "Integration tests verify stage result payloads remain small and do not contain large processing texts",
+            "Integration tests verify non-critical link/image failures can still end in Ready with warnings",
+            "Integration tests verify expired empty Drafts are deleted and unused assets are removed, while Drafts with text, assets, or links are preserved"
+          ],
+          "priority": 1,
+          "passes": false,
+          "notes": "The specification explicitly names all of these orchestration and cleanup scenarios as required integration coverage."
+        },
+        {
+          "id": "US-081",
+          "title": "Document and preserve the manual acceptance checklist as part of development verification",
+          "description": "Make the required manual acceptance checklist easy to execute during development, matching the scenarios listed in the specification for startup, note creation, image/link handling, title generation, search, reindex, delete, backup/restore, and Draft cleanup.",
+          "acceptanceCriteria": [
+            "Development documentation or test notes include the manual checklist items from the specification",
+            "The checklist covers startup, create/edit/save, #tag conversion, autogenerated title, Processing -> Ready, hybrid search, tag/folder filtering, reindex, delete, backup/restore, and Draft TTL cleanup"
+          ],
+          "priority": 3,
+          "passes": false,
+          "notes": "Section 8 includes a mandatory manual acceptance checklist even though the automated test layer is unit + integration only."
+        }
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The spec gives a non-exhaustive but mandatory minimum test list. Additional tests should be added for implemented functionality, but the formal deliverable remains unit + integration tests only."
+    }
+  ]
+}
