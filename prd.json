@@ -502,8 +502,8 @@
             "Old version-aware processing tables may remain as history but no longer affect search or display"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly forbids 'ghost' old content remaining searchable after a note returns to Draft."
+          "passes": true,
+          "notes": "The spec explicitly forbids 'ghost' old content remaining searchable after a note returns to Draft. Added a shared `build_draft_reset_state()` helper in `app.domain.note_lifecycle` and wired note-save persistence to clear `summary`, `search_text`, `embedding`, `processing_error`, and warning fields whenever a non-meaningful save returns a note to `Draft`."
         },
         {
           "id": "US-032",

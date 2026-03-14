@@ -25,3 +25,16 @@ def test_meaningful_content_requires_text_asset_or_http_link() -> None:
     assert module.has_meaningful_content(content_text_flat="   ", asset_count=1, link_count=0) is True
     assert module.has_meaningful_content(content_text_flat="   ", asset_count=0, link_count=1) is True
     assert module.has_meaningful_content(content_text_flat="\n\t  ", asset_count=0, link_count=0) is False
+
+
+def test_draft_reset_state_clears_derived_fields() -> None:
+    module = load_note_lifecycle_module()
+    reset_state = module.build_draft_reset_state()
+
+    assert reset_state.summary == ""
+    assert reset_state.search_text == ""
+    assert reset_state.embedding is None
+    assert reset_state.processing_error is None
+    assert reset_state.has_warnings is False
+    assert reset_state.warnings_count == 0
+    assert reset_state.processing_warnings == []

@@ -27,6 +27,8 @@ def test_note_save_service_parses_content_and_dispatches_pipeline() -> None:
     assert 'should_start_processing = has_meaningful_content(' in domain_source
     assert 'should_start_processing=should_start_processing' in domain_source
     assert 'self._pipeline_dispatcher.start_pipeline(' in domain_source
+    assert 'class DraftResetState:' in lifecycle_source
+    assert 'def build_draft_reset_state() -> DraftResetState:' in lifecycle_source
     assert 'return bool(content_text_flat.strip() or asset_count > 0 or link_count > 0)' in lifecycle_source
     assert 'URL_PATTERN = re.compile(r"https?://[^\\s<>()]+", re.IGNORECASE)' in parsing_source
     assert 'if node_type == "image" and isinstance(attrs.get("assetId"), str):' in parsing_source
@@ -47,6 +49,14 @@ def test_note_save_repository_syncs_links_assets_and_processing_state() -> None:
     assert 'if should_start_processing:' in infra_source
     assert 'note.index_version += 1' in infra_source
     assert 'note.status = "Processing"' in infra_source
+    assert 'draft_reset_state = build_draft_reset_state()' in infra_source
     assert 'note.status = "Draft"' in infra_source
+    assert 'note.summary = draft_reset_state.summary' in infra_source
+    assert 'note.search_text = draft_reset_state.search_text' in infra_source
+    assert 'note.embedding = draft_reset_state.embedding' in infra_source
+    assert 'note.processing_error = draft_reset_state.processing_error' in infra_source
+    assert 'note.has_warnings = draft_reset_state.has_warnings' in infra_source
+    assert 'note.warnings_count = draft_reset_state.warnings_count' in infra_source
+    assert 'note.processing_warnings = draft_reset_state.processing_warnings' in infra_source
     assert 'name="sematrix.start_pipeline"' in worker_source
     assert '"pipeline_entrypoint_requested"' in worker_source

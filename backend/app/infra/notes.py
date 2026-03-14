@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.domain.errors import NotFoundError
+from app.domain.note_lifecycle import build_draft_reset_state
 from app.domain.note_content import ExtractedLink
 from app.infra.assets import get_asset_path
 from app.infra.models import Asset, Folder, Note, NoteAsset, NoteLink, NoteTag, Tag
@@ -178,7 +179,15 @@ class SqlAlchemyNoteRepository:
             note.warnings_count = 0
             note.processing_warnings = []
         else:
+            draft_reset_state = build_draft_reset_state()
             note.status = "Draft"
+            note.summary = draft_reset_state.summary
+            note.search_text = draft_reset_state.search_text
+            note.embedding = draft_reset_state.embedding
+            note.processing_error = draft_reset_state.processing_error
+            note.has_warnings = draft_reset_state.has_warnings
+            note.warnings_count = draft_reset_state.warnings_count
+            note.processing_warnings = draft_reset_state.processing_warnings
 
         self._session.add(note)
         self._session.commit()
