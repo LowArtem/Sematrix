@@ -51,6 +51,40 @@ Thread: CLI run
     - The exact RU+EN generated `search_tsv` expression was already in place from the earlier notes schema work, so this story only had to harden the index layer around that fixed search storage contract.
 ---
 
+## [2026-03-14 18:49:49 +0300] - EP-002 / epic-finalization
+Epic: Database schema, pgvector, and migrations
+Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
+Story: Finalize EP-002 on the integration branch
+Thread: CLI run
+- What was implemented
+  - Fixed the invalid PRD integration branch naming by renaming the top-level branch to `ralph/sematrix-mvp-base`, which avoids the Git ref-prefix collision with epic branches under `ralph/sematrix-mvp/...`.
+  - Added the branch-naming invariant to `AGENTS.md` and the shared codebase patterns so future epic finalization runs keep the integration branch separate from the epic namespace.
+  - Created `ralph/sematrix-mvp-base` from `master`, merged `ralph/sematrix-mvp/ep-002-db-schema-pgvector` into it, and revalidated the merged schema on the integration branch.
+- Files changed
+  - `AGENTS.md`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest` ✅ (13 passed)
+  - `docker compose build backend` ✅
+  - `docker compose up -d postgres` ✅
+  - `docker compose exec -T postgres ... pg_isready` ✅
+  - `docker compose exec -T postgres ... DROP/CREATE DATABASE sematrix_ep002_merge_check` ✅
+  - `docker compose run --rm --no-deps -e DATABASE_URL=postgresql+psycopg://sematrix:sematrix@postgres:5432/sematrix_ep002_merge_check backend alembic upgrade head` ✅
+  - PostgreSQL inspection queries for merged `note_links` constraints on the integration branch ✅
+  - `docker compose down` ✅
+- PRD updates made
+  - Updated the top-level `branchName` to `ralph/sematrix-mvp-base` so the integration branch can exist locally beside the epic branches.
+  - Confirmed `EP-002` remains `passes: true` after the integration-branch merge and post-merge validation.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Integration branches in nested PRDs must not share a slash-prefix with epic branches, or local Git branch creation/merge flow breaks.
+  - Gotchas encountered
+    - A failed `git checkout -b` into a conflicting branch namespace can leave staged checkout noise behind, so check `git status` immediately and restore from `HEAD` before continuing.
+  - Useful context
+    - The active project integration branch is now `ralph/sematrix-mvp-base`, while the EP-002 implementation history remains on `ralph/sematrix-mvp/ep-002-db-schema-pgvector`.
+---
+
 ## [2026-03-14 18:45:17 +0300] - EP-002 / US-011
 Epic: Database schema, pgvector, and migrations
 Epic Branch: ralph/sematrix-mvp/ep-002-db-schema-pgvector
