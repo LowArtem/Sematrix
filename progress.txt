@@ -2,6 +2,7 @@
 - Keep frontend note-detail and folder reads in shared `frontend/src/api.ts` helpers so route components stay focused on screen state while `/api/notes/{id}` and `/api/folders` contracts remain centralized.
 - Keep the frontend Tiptap extension set centralized in one note-editor component and derive updated `content_json` from `editor.getJSON()` there, so later Save/image/tag stories can share one editor source of truth.
 - Keep note-editor image insertion behind one shared frontend upload helper so toolbar upload, drag-drop, and clipboard paste all create the same assetId-backed Tiptap image nodes instead of drifting into per-flow data URL handling.
+- Keep note-editor inline image rendering inside that same centralized image extension, deriving `/api/assets/{assetId}` from `assetId` so reloaded notes still display images even when stored `content_json` omits `src`.
 - Keep note-editor `#tag` auto-conversion in one shared Tiptap keydown path that only runs in normal text, deletes the finished token in a single transaction, and then hands normalized tag/focus updates back to screen state so later rollback behavior has one place to hook into.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
@@ -2093,4 +2094,36 @@ Thread: CLI run
     - Save can return either `200 NoteDetailDto` or `202 AsyncAcceptedDto`, so the frontend has to handle both response shapes instead of assuming a single payload type.
   - Useful context
     - The editor screen now owns draft title/folder/tag/content state locally, while `GET /api/notes/{id}` remains the source of truth used to resync status and persisted content after Save/Reindex calls.
+---
+
+## [2026-03-15 17:47:16 +0300] - EP-009 / US-067
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Render inline note images from backend asset URLs
+Thread: CLI run
+- What was implemented
+  - Updated `frontend/src/App.tsx` so the centralized `AssetImage` Tiptap extension now derives `/api/assets/{assetId}` during image-node rendering whenever a persisted node has `assetId` but no stored `src`, while keeping images inline in the editor text flow.
+  - Switched newly inserted image nodes to the same `assetId`-derived asset URL helper and expanded `backend/tests/test_note_editor_images.py` coverage to lock in the render-time asset URL fallback plus the inline-image styling contract.
+  - Recorded the reusable assetId-driven render rule in `AGENTS.md` and the top-level `## Codebase Patterns` section so later editor work keeps inline image resolution centralized.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_editor_images.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_images.py backend/tests/test_note_editor_tiptap.py backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (140 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-067` as passed and added a durable note about deriving inline render URLs from `assetId` so note reloads do not depend on persisted `src`.
+  - Re-evaluated `EP-009`; it remains `passes: false` because the warning-detail story `US-072` is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep inline note-image rendering inside the centralized Tiptap image extension so both fresh uploads and reloaded notes resolve `/api/assets/{assetId}` from `assetId` consistently.
+  - Gotchas encountered
+    - Persisted note content may legitimately omit `src` because `assetId` is the real source of truth, so relying on stored `src` alone can make previously uploaded images disappear after reload.
+  - Useful context
+    - `frontend/src/App.tsx` now treats `assetId` as enough information to render inline images in the editor, while the remaining EP-009 work is limited to surfacing warning/error detail more richly on the note screen.
 ---

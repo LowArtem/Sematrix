@@ -124,6 +124,10 @@ function EditorToolbarButton({
   )
 }
 
+function buildAssetUrl(assetId: string): string {
+  return `/api/assets/${assetId}`
+}
+
 const AssetImage = Image.extend({
   addAttributes() {
     return {
@@ -140,6 +144,18 @@ const AssetImage = Image.extend({
         },
       },
     }
+  },
+  renderHTML({ HTMLAttributes }) {
+    const resolvedAttributes = {
+      ...this.options.HTMLAttributes,
+      ...HTMLAttributes,
+    }
+
+    if (resolvedAttributes.assetId && !resolvedAttributes.src) {
+      resolvedAttributes.src = buildAssetUrl(String(resolvedAttributes.assetId))
+    }
+
+    return ["img", resolvedAttributes]
   },
 })
 
@@ -316,7 +332,7 @@ const NoteEditor = forwardRef<TagAutoConvertRollbackHandle, {
       return
     }
 
-    const imageAttributes = { src: asset.url, alt: assetAlt, assetId: asset.id }
+    const imageAttributes = { src: buildAssetUrl(asset.id), alt: assetAlt, assetId: asset.id }
 
     editor
       .chain()
