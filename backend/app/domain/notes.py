@@ -23,7 +23,7 @@ from app.infra.notes import (
 
 
 TAG_NAME_INNER_PATTERN = TAG_NAME_PATTERN.pattern.removeprefix("^").removesuffix("$")
-HASHTAG_PATTERN = re.compile(rf"(?<!\w)#({TAG_NAME_INNER_PATTERN})(?=$|[^\w])")
+HASHTAG_PATTERN = re.compile(rf"(?<!\w)#({TAG_NAME_INNER_PATTERN})(?=$|[\s.,!?;:)\]])")
 logger = get_logger(__name__)
 
 

@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Derive `GET /api/notes` hashtag parsing from the shared tag-name validator so search-time `#tag` extraction stays aligned with backend tag normalization rules.
+- Treat a search hashtag as valid only when it ends at the query boundary or common closing punctuation, so invalid tokens like `#bad-tag` stay in free text instead of being partially stripped into a false tag filter.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -83,6 +84,35 @@ Thread: CLI run
     - Existing source-guard tests in this repo may assert exact dependency wiring strings, so backend dependency cleanup must preserve or deliberately update those expectations when adding new injected clients.
   - Useful context
     - `NoteService.list_notes(...)` now keeps empty-text queries on the plain listing path, while non-empty free-text queries go through query embedding, pgvector candidate retrieval, RRF fusion, and final note hydration through the same public `GET /api/notes` route.
+---
+
+## [2026-03-15 12:02:04 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Tightened `app.domain.notes` hashtag parsing so `GET /api/notes` still extracts valid backend-owned `#tag` filters from `q`, but no longer partially strips invalid hashtag-like tokens such as `#bad-tag` into accidental tag filters.
+  - Added parser-focused pytest coverage in `backend/tests/test_note_query_parsing.py` that executes the extracted parser logic against normalized/deduplicated tags, invalid embedded hashtags, and trailing-punctuation cases.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (135 passed)
+- PRD updates made
+  - Refreshed the `US-049` note to mention the invalid-hashtag partial-match guard alongside the existing backend-owned query parsing behavior.
+  - Re-evaluated `EP-007`; it remains `passes: false` because `US-050` through `US-055` are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Treat search hashtags as tags only when they end cleanly, so malformed tokens do not silently change backend filtering semantics.
+  - Gotchas encountered
+    - A generic `[^\w]` hashtag boundary is too permissive here because it treats the `#bad` prefix of `#bad-tag` as a valid filter token and leaves confusing free-text fragments behind.
+  - Useful context
+    - `backend/tests/test_note_query_parsing.py` now executes the parser extracted from `backend/app/domain/notes.py` directly, which keeps the query-shape coverage local without importing the whole backend dependency graph.
 ---
 
 ## [2026-03-15 11:39:11 +0300] - EP-007 / US-052
