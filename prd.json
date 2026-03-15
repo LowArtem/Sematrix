@@ -1041,8 +1041,8 @@
             "Unsupported extra editor features are not required to satisfy MVP"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly fixes the minimum supported Tiptap feature set."
+          "passes": true,
+          "notes": "The spec explicitly fixes the minimum supported Tiptap feature set. The note screen now swaps the JSON textarea for a centralized Tiptap editor configured with StarterKit plus Link and inline Image support, exposes toolbar actions for paragraphs/bold/italic/lists/links/code blocks/headings/block quotes, and mirrors edits back to serialized `content_json` through `editor.getJSON()` for later Save wiring."
         },
         {
           "id": "US-066",

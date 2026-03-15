@@ -1,3 +1,7 @@
+import Image from "@tiptap/extension-image"
+import Link from "@tiptap/extension-link"
+import StarterKit from "@tiptap/starter-kit"
+import { EditorContent, useEditor } from "@tiptap/react"
 import { useEffect, useMemo, useState } from "react"
 
 import { getNoteDetail, listFolders, type ApiError, type Folder, type NoteDetail } from "./api"
@@ -58,6 +62,160 @@ function statusTone(status: string): string {
   }
 }
 
+function EditorToolbarButton({
+  label,
+  onClick,
+  active = false,
+  disabled = false,
+}: {
+  label: string
+  onClick: () => void
+  active?: boolean
+  disabled?: boolean
+}) {
+  return (
+    <button
+      className={`toolbar-button${active ? " is-active" : ""}`}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {label}
+    </button>
+  )
+}
+
+function NoteEditor({
+  contentJson,
+  onContentChange,
+}: {
+  contentJson: Record<string, unknown>
+  onContentChange: (nextContent: Record<string, unknown>) => void
+}) {
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit,
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+      }),
+      Image.configure({
+        inline: true,
+        allowBase64: false,
+        HTMLAttributes: {
+          class: "note-inline-image",
+        },
+      }),
+    ],
+    content: contentJson,
+    onUpdate: ({ editor: nextEditor }) => {
+      onContentChange(nextEditor.getJSON() as Record<string, unknown>)
+    },
+  })
+
+  useEffect(() => {
+    if (!editor) {
+      return
+    }
+
+    editor.commands.setContent(contentJson, false)
+  }, [contentJson, editor])
+
+  if (!editor) {
+    return <div className="editor-loading">Preparing the editor...</div>
+  }
+
+  const setLink = () => {
+    const previousUrl = String(editor.getAttributes("link").href ?? "")
+    const nextUrl = window.prompt("Enter a link URL", previousUrl)
+
+    if (nextUrl === null) {
+      return
+    }
+
+    const trimmedUrl = nextUrl.trim()
+    if (!trimmedUrl) {
+      editor.chain().focus().extendMarkRange("link").unsetLink().run()
+      return
+    }
+
+    editor.chain().focus().extendMarkRange("link").setLink({ href: trimmedUrl }).run()
+  }
+
+  return (
+    <div className="editor-stack">
+      <div className="editor-toolbar" aria-label="Tiptap formatting toolbar">
+        <EditorToolbarButton
+          label="P"
+          onClick={() => editor.chain().focus().setParagraph().run()}
+          active={editor.isActive("paragraph")}
+        />
+        <EditorToolbarButton
+          label="H1"
+          onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+          active={editor.isActive("heading", { level: 1 })}
+        />
+        <EditorToolbarButton
+          label="H2"
+          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          active={editor.isActive("heading", { level: 2 })}
+        />
+        <EditorToolbarButton
+          label="Bold"
+          onClick={() => editor.chain().focus().toggleBold().run()}
+          active={editor.isActive("bold")}
+        />
+        <EditorToolbarButton
+          label="Italic"
+          onClick={() => editor.chain().focus().toggleItalic().run()}
+          active={editor.isActive("italic")}
+        />
+        <EditorToolbarButton
+          label="Bullet"
+          onClick={() => editor.chain().focus().toggleBulletList().run()}
+          active={editor.isActive("bulletList")}
+        />
+        <EditorToolbarButton
+          label="Ordered"
+          onClick={() => editor.chain().focus().toggleOrderedList().run()}
+          active={editor.isActive("orderedList")}
+        />
+        <EditorToolbarButton
+          label="Quote"
+          onClick={() => editor.chain().focus().toggleBlockquote().run()}
+          active={editor.isActive("blockquote")}
+        />
+        <EditorToolbarButton
+          label="Code"
+          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          active={editor.isActive("codeBlock")}
+        />
+        <EditorToolbarButton
+          label="Link"
+          onClick={setLink}
+          active={editor.isActive("link")}
+        />
+        <EditorToolbarButton
+          label="Unlink"
+          onClick={() => editor.chain().focus().extendMarkRange("link").unsetLink().run()}
+          disabled={!editor.isActive("link")}
+        />
+      </div>
+
+      <div className="editor-frame">
+        <EditorContent editor={editor} className="tiptap-shell" />
+      </div>
+
+      <div className="editor-caption-row">
+        <span>Paragraphs, headings, lists, links, quotes, and code blocks are enabled.</span>
+        <span>Inline image nodes are configured and render in the text flow when present.</span>
+      </div>
+    </div>
+  )
+}
+
 function AppHome() {
   return (
     <main className="library-shell">
@@ -78,6 +236,7 @@ function AppHome() {
 
 function NoteScreen({ noteId }: { noteId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" })
+  const [draftContentJson, setDraftContentJson] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -87,6 +246,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
     Promise.all([getNoteDetail(noteId, controller.signal), listFolders(controller.signal)])
       .then(([note, folders]) => {
         if (!controller.signal.aborted) {
+          setDraftContentJson(note.content_json)
           setState({ status: "ready", note, folders })
         }
       })
@@ -128,7 +288,8 @@ function NoteScreen({ noteId }: { noteId: string }) {
   }
 
   const { note, folders } = state
-  const contentJson = JSON.stringify(note.content_json, null, 2)
+  const editorContentJson = draftContentJson ?? note.content_json
+  const serializedContentJson = JSON.stringify(editorContentJson, null, 2)
 
   return (
     <main className="note-shell">
@@ -208,9 +369,10 @@ function NoteScreen({ noteId }: { noteId: string }) {
           <section className="field-block">
             <div className="section-heading">
               <span className="field-label">Editor Content</span>
-              <span className="section-caption">Current JSON document payload</span>
+              <span className="section-caption">Tiptap editor with serialized JSON preview</span>
             </div>
-            <textarea className="editor-surface" value={contentJson} readOnly />
+            <NoteEditor contentJson={note.content_json} onContentChange={setDraftContentJson} />
+            <textarea className="editor-surface" value={serializedContentJson} readOnly />
           </section>
 
           <div className="action-row">

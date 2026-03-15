@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Keep frontend note-detail and folder reads in shared `frontend/src/api.ts` helpers so route components stay focused on screen state while `/api/notes/{id}` and `/api/folders` contracts remain centralized.
+- Keep the frontend Tiptap extension set centralized in one note-editor component and derive updated `content_json` from `editor.getJSON()` there, so later Save/image/tag stories can share one editor source of truth.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -106,8 +107,43 @@ Thread: CLI run
     - Keep note-detail and folder fetches in shared frontend API helpers so future editor stories can reuse the same REST contracts without duplicating fetch/error logic in route components.
   - Gotchas encountered
     - The note-detail route needs folder data alongside `NoteDetailDto` on first load, or the folder selector cannot render the current `folder_id` coherently.
+- Useful context
+  - `frontend/src/App.tsx` now treats `/notes/:id` as the editor route and shows backend error payloads directly, which later Tiptap and action stories can build on without changing the route contract.
+---
+
+## [2026-03-15 12:25:05 +0300] - EP-009 / US-065
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Configure Tiptap with the exact minimum editor feature set
+Thread: CLI run
+- What was implemented
+  - Replaced the note-detail JSON-only content area with a real Tiptap editor in `frontend/src/App.tsx`, using a centralized extension set built from StarterKit plus Link and inline Image support.
+  - Added a formatting toolbar for paragraphs, headings, bold, italic, bullet/ordered lists, block quotes, code blocks, and links, while mirroring each editor update back to serialized `content_json` via `editor.getJSON()` for later Save wiring.
+  - Added frontend source-guard coverage in `backend/tests/test_note_editor_tiptap.py`, refreshed the note-detail screen source checks, updated `frontend/package.json` + `frontend/package-lock.json`, and documented the reusable editor-source-of-truth rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_tiptap.py`
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tiptap.py backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (127 passed)
+- PRD updates made
+  - Marked `US-065` as passed and added a durable note about the centralized Tiptap extension set, the supported formatting surface, and `editor.getJSON()`-backed `content_json` serialization.
+  - Re-evaluated `EP-009`; it remains `passes: false` because image insertion/rendering, manual tags, auto-conversion/rollback, actions, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the Tiptap extension set centralized in one note-editor component and derive outgoing `content_json` from `editor.getJSON()` there, so later note actions reuse one frontend source of truth.
+  - Gotchas encountered
+    - Existing source-guard tests for the note screen may assert exact serialization snippets, so editor upgrades need those guards refreshed alongside the UI changes.
   - Useful context
-    - `frontend/src/App.tsx` now treats `/notes/:id` as the editor route and shows backend error payloads directly, which later Tiptap and action stories can build on without changing the route contract.
+    - `frontend/src/App.tsx` now has a live Tiptap surface with the MVP formatting baseline, while image uploads, asset-backed rendering, and save/delete/reindex wiring still intentionally wait for later EP-009 stories.
 ---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046

@@ -167,6 +167,7 @@ Do not move business logic into route handlers or UI code.
   - embeddings
   - ranking / score calculation
 - Frontend must not implement backend indexing logic locally.
+- Keep the Tiptap extension set centralized in the note-editor UI and derive outgoing `content_json` from `editor.getJSON()` there, so later note actions reuse one frontend source of truth instead of hand-building document payloads.
 - MVP status updates are **REST-based only**. Do not add SSE/WebSocket status streaming unless explicitly requested.
 
 ---
