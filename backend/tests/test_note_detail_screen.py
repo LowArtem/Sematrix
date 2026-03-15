@@ -43,7 +43,7 @@ def test_note_detail_screen_renders_note_fields_and_action_layout() -> None:
     assert "Reindex" in app_source
     assert "Delete" in app_source
     assert "const serializedContentJson = JSON.stringify(editorContentJson, null, 2)" in app_source
-    assert "<NoteEditor contentJson={note.content_json} onContentChange={setDraftContentJson} />" in app_source
+    assert "<NoteEditor noteId={note.id} contentJson={note.content_json} onContentChange={setDraftContentJson} />" in app_source
 
 
 def test_note_detail_screen_surfaces_backend_error_message_for_unknown_note() -> None:

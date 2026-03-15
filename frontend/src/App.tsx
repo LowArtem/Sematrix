@@ -2,9 +2,17 @@ import Image from "@tiptap/extension-image"
 import Link from "@tiptap/extension-link"
 import StarterKit from "@tiptap/starter-kit"
 import { EditorContent, useEditor } from "@tiptap/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
-import { getNoteDetail, listFolders, type ApiError, type Folder, type NoteDetail } from "./api"
+import {
+  getNoteDetail,
+  listFolders,
+  uploadImage,
+  type ApiError,
+  type Asset,
+  type Folder,
+  type NoteDetail,
+} from "./api"
 
 type Route =
   | { kind: "home" }
@@ -85,13 +93,44 @@ function EditorToolbarButton({
   )
 }
 
+const AssetImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      assetId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-asset-id"),
+        renderHTML: (attributes) => {
+          if (!attributes.assetId) {
+            return {}
+          }
+
+          return { "data-asset-id": String(attributes.assetId) }
+        },
+      },
+    }
+  },
+})
+
+function extractImageFiles(fileList: FileList | null): File[] {
+  return Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"))
+}
+
 function NoteEditor({
+  noteId,
   contentJson,
   onContentChange,
 }: {
+  noteId: string
   contentJson: Record<string, unknown>
   onContentChange: (nextContent: Record<string, unknown>) => void
 }) {
+  const [uploadState, setUploadState] = useState<{ status: "idle" | "uploading" | "error"; message: string }>({
+    status: "idle",
+    message: "",
+  })
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -101,7 +140,7 @@ function NoteEditor({
         autolink: true,
         linkOnPaste: true,
       }),
-      Image.configure({
+      AssetImage.configure({
         inline: true,
         allowBase64: false,
         HTMLAttributes: {
@@ -110,10 +149,64 @@ function NoteEditor({
       }),
     ],
     content: contentJson,
+    editorProps: {
+      handlePaste: (_view, event) => {
+        const imageFiles = extractImageFiles(event.clipboardData?.files ?? null)
+        if (!imageFiles.length) {
+          return false
+        }
+
+        event.preventDefault()
+        void uploadAndInsertFiles(imageFiles)
+        return true
+      },
+      handleDrop: (_view, event) => {
+        const imageFiles = extractImageFiles(event.dataTransfer?.files ?? null)
+        if (!imageFiles.length) {
+          return false
+        }
+
+        event.preventDefault()
+        void uploadAndInsertFiles(imageFiles)
+        return true
+      },
+    },
     onUpdate: ({ editor: nextEditor }) => {
       onContentChange(nextEditor.getJSON() as Record<string, unknown>)
     },
   })
+
+  const insertUploadedImage = (asset: Asset, assetAlt: string) => {
+    if (!editor) {
+      return
+    }
+
+    editor
+      .chain()
+      .focus()
+      .setImage({ src: asset.url, alt: assetAlt, assetId: asset.id })
+      .run()
+  }
+
+  const uploadAndInsertFiles = async (imageFiles: File[]) => {
+    if (!imageFiles.length) {
+      return
+    }
+
+    setUploadState({ status: "uploading", message: "Uploading image..." })
+
+    try {
+      for (const imageFile of imageFiles) {
+        const asset = await uploadImage(noteId, imageFile)
+        insertUploadedImage(asset, imageFile.name)
+      }
+
+      setUploadState({ status: "idle", message: "" })
+    } catch (error) {
+      const nextError = toApiError(error)
+      setUploadState({ status: "error", message: nextError.message })
+    }
+  }
 
   useEffect(() => {
     if (!editor) {
@@ -144,8 +237,27 @@ function NoteEditor({
     editor.chain().focus().extendMarkRange("link").setLink({ href: trimmedUrl }).run()
   }
 
+  const openImagePicker = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleImageInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const imageFiles = extractImageFiles(event.target.files)
+    event.target.value = ""
+    await uploadAndInsertFiles(imageFiles)
+  }
+
   return (
     <div className="editor-stack">
+      <input
+        ref={fileInputRef}
+        className="sr-only-file-input"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/*"
+        multiple
+        onChange={handleImageInputChange}
+      />
+
       <div className="editor-toolbar" aria-label="Tiptap formatting toolbar">
         <EditorToolbarButton
           label="P"
@@ -198,6 +310,11 @@ function NoteEditor({
           active={editor.isActive("link")}
         />
         <EditorToolbarButton
+          label="Image"
+          onClick={openImagePicker}
+          disabled={uploadState.status === "uploading"}
+        />
+        <EditorToolbarButton
           label="Unlink"
           onClick={() => editor.chain().focus().extendMarkRange("link").unsetLink().run()}
           disabled={!editor.isActive("link")}
@@ -210,8 +327,15 @@ function NoteEditor({
 
       <div className="editor-caption-row">
         <span>Paragraphs, headings, lists, links, quotes, and code blocks are enabled.</span>
-        <span>Inline image nodes are configured and render in the text flow when present.</span>
+        <span>Insert images with the toolbar, drag-and-drop, or clipboard paste.</span>
       </div>
+
+      {uploadState.status === "uploading" ? (
+        <p className="editor-upload-message">Uploading image...</p>
+      ) : null}
+      {uploadState.status === "error" ? (
+        <p className="editor-upload-error">{uploadState.message}</p>
+      ) : null}
     </div>
   )
 }
@@ -371,7 +495,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
               <span className="field-label">Editor Content</span>
               <span className="section-caption">Tiptap editor with serialized JSON preview</span>
             </div>
-            <NoteEditor contentJson={note.content_json} onContentChange={setDraftContentJson} />
+            <NoteEditor noteId={note.id} contentJson={note.content_json} onContentChange={setDraftContentJson} />
             <textarea className="editor-surface" value={serializedContentJson} readOnly />
           </section>
 

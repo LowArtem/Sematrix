@@ -1056,8 +1056,8 @@
             "The rendered image can use /api/assets/{assetId} as src but data URLs are not stored in content_json"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec is explicit that assetId is required in the node and data URLs must not be the source of truth."
+          "passes": true,
+          "notes": "The spec is explicit that assetId is required in the node and data URLs must not be the source of truth. The note editor now routes toolbar upload, drag-drop, and clipboard paste through one shared frontend upload helper that posts `note_id` plus image file to `/api/assets/image`, then inserts inline Tiptap image nodes with `assetId` as the durable source of truth and backend asset URLs only as derived render data."
         },
         {
           "id": "US-067",

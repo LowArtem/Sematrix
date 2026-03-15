@@ -34,6 +34,13 @@ export type Folder = {
   notes_count: number | null
 }
 
+export type Asset = {
+  id: string
+  mime_type: string
+  size_bytes: number
+  url: string
+}
+
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init)
 
@@ -61,4 +68,16 @@ export function getNoteDetail(noteId: string, signal?: AbortSignal): Promise<Not
 
 export function listFolders(signal?: AbortSignal): Promise<Folder[]> {
   return readJson<Folder[]>("/api/folders", { signal })
+}
+
+export function uploadImage(noteId: string, file: File, signal?: AbortSignal): Promise<Asset> {
+  const formData = new FormData()
+  formData.append("note_id", noteId)
+  formData.append("file", file)
+
+  return readJson<Asset>("/api/assets/image", {
+    method: "POST",
+    body: formData,
+    signal,
+  })
 }
