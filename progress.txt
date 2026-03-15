@@ -4,6 +4,8 @@
 - Keep note-editor image insertion behind one shared frontend upload helper so toolbar upload, drag-drop, and clipboard paste all create the same assetId-backed Tiptap image nodes instead of drifting into per-flow data URL handling.
 - Keep note-editor inline image rendering inside that same centralized image extension, deriving `/api/assets/{assetId}` from `assetId` so reloaded notes still display images even when stored `content_json` omits `src`.
 - Keep note-editor `#tag` auto-conversion in one shared Tiptap keydown path that only runs in normal text, deletes the finished token in a single transaction, and then hands normalized tag/focus updates back to screen state so later rollback behavior has one place to hook into.
+- Derive `GET /api/notes` hashtag parsing from the shared tag-name validator so search-time `#tag` extraction stays aligned with backend tag normalization rules.
+- Treat a search hashtag as valid only when it ends at the query boundary or common closing punctuation, so invalid tokens like `#bad-tag` stay in free text instead of being partially stripped into a false tag filter.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -26,6 +28,7 @@
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
+- Treat punctuation-only leftovers after stripping valid `#tags` from `q` as an empty text query, so tag-only note searches stay on the stable listing path instead of accidentally triggering hybrid text search.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
 - Keep note-editor tag normalization in one frontend helper that mirrors the backend lowercase/no-spaces/allowed-character rules, so manual tag entry and later `#tag` auto-conversion reuse the same UX guardrails without changing backend ownership.
 - Keep the Draft-versus-Processing decision in a shared domain helper so save flows and later Draft-cleanup logic can reuse the exact meaningful-content rule.
@@ -50,7 +53,201 @@
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+<<<<<<< HEAD
 - Keep note-screen Save/Reindex/Delete calls in shared `frontend/src/api.ts` helpers and refresh note detail with normal REST reads after accepted mutations so the editor reflects persisted backend state without inventing SSE/WebSocket status logic.
+=======
+- Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
+- Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
+- Keep note lexical search in `app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery` expression for both `@@` matching and `ts_rank_cd` ranking.
+- Keep hybrid-search RRF fusion in a shared domain helper, reuse one `RRF_TOPN` value for both lexical and vector candidate preselect queries after filters, and paginate only after the fused `score desc, updated_at desc, id desc` ordering is built.
+
+## [2026-03-15 11:48:59 +0300] - EP-007 / US-054
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement RRF score fusion, stable sorting, and final pagination
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/domain/search.py` with a shared Reciprocal Rank Fusion helper that merges lexical/vector candidate ranks with `1 / (k + rank)`, then applies stable `score desc, updated_at desc, id desc` ordering before any pagination slice.
+  - Updated `backend/app/infra/notes.py` with pgvector-backed vector candidate retrieval on `notes.embedding` plus note-by-id hydration, and updated `backend/app/domain/notes.py` so `GET /api/notes` now runs hybrid search for non-empty free-text queries by embedding the query, fetching both candidate lists with the same `RRF_TOPN`, fusing them, and applying `limit/offset` only after final ranking.
+  - Added `backend/tests/test_note_hybrid_search.py` runtime and source coverage for RRF scoring, tie-breaking, post-fusion pagination, shared `RRF_TOPN` usage, and the non-ANN vector query path.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dependencies.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/domain/search.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_hybrid_search.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (132 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-053`, `US-054`, and `US-055` as passed and added durable notes about pgvector candidate retrieval, shared RRF fusion, and the final hybrid `GET /api/notes` flow.
+  - Re-evaluated `EP-007`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep hybrid-search RRF fusion separate from repository candidate retrieval so lexical/vector preselect queries can stay backend-driven while one shared helper owns score calculation, stable sorting, and post-fusion pagination.
+  - Gotchas encountered
+    - Existing source-guard tests in this repo may assert exact dependency wiring strings, so backend dependency cleanup must preserve or deliberately update those expectations when adding new injected clients.
+  - Useful context
+    - `NoteService.list_notes(...)` now keeps empty-text queries on the plain listing path, while non-empty free-text queries go through query embedding, pgvector candidate retrieval, RRF fusion, and final note hydration through the same public `GET /api/notes` route.
+---
+
+## [2026-03-15 17:18:13 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Strengthened the query-parsing coverage so `parse_note_query(...)` now stays locked to whitespace-normalized free-text remainder behavior after hashtag removal, including multiline input where valid `#tag` filters and raw text are mixed.
+  - Added source-guard coverage that keeps tag-only searches on the plain listing path while still forwarding extracted tag filters into the shared `GET /api/notes` listing flow instead of the hybrid search path.
+- Files changed
+  - `backend/tests/test_note_list_api.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py` ✅
+  - `python -m pytest` ✅ (138 passed)
+- PRD updates made
+  - Refreshed the `US-049` note to document multiline whitespace normalization in the remaining free-text query after hashtag extraction.
+  - Re-checked `EP-007`; its acceptance criteria remain satisfied.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Query parsing for `GET /api/notes` should keep tag-only searches on the plain listing path and reserve hybrid search only for requests with non-empty free text after hashtag removal.
+  - Gotchas encountered
+    - Parser coverage needs to account for newline and tab collapse after removing tags, or later regex tweaks can preserve formatting noise that changes the semantic query string.
+  - Useful context
+    - `app.domain.notes.parse_note_query(...)` and `NoteService.list_notes(...)` remain the single backend entrypoint for tag extraction plus list-vs-hybrid routing before repository search logic runs.
+---
+
+## [2026-03-15 12:56:27 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Tightened `app.domain.notes.parse_note_query(...)` so punctuation-only leftovers after valid hashtag removal are normalized to an empty `text_query`, keeping true tag-only searches on the stable listing path instead of the hybrid-text path.
+  - Extended `backend/tests/test_note_query_parsing.py` with a regression case for inputs like `#Focus, #ready!`, while preserving the existing behavior that mixed text plus tagged punctuation still leaves the textual remainder intact.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py` ✅
+  - `python -m pytest` ✅ (136 passed)
+  - `python -m compileall backend/app` ✅
+- PRD updates made
+  - Refined the existing `US-049` note to capture the punctuation-only tag-only query behavior now covered by the parser regression test.
+  - `EP-007` was already marked passed on this branch and remains passed.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Treat punctuation-only text left behind by hashtag stripping as empty search text, or tag-only queries like `#focus, #ready!` can accidentally route into hybrid search.
+  - Gotchas encountered
+    - Removing `#tag` tokens with regex substitution can leave commas/exclamation marks behind, so whitespace normalization alone is not enough to decide whether free-text search should run.
+  - Useful context
+    - The existing parser still preserves punctuation when real words remain, so mixed queries such as `review #focus, then ship #ready!` continue to feed the textual remainder to the hybrid-search path.
+---
+
+## [2026-03-15 12:02:04 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Tightened `app.domain.notes` hashtag parsing so `GET /api/notes` still extracts valid backend-owned `#tag` filters from `q`, but no longer partially strips invalid hashtag-like tokens such as `#bad-tag` into accidental tag filters.
+  - Added parser-focused pytest coverage in `backend/tests/test_note_query_parsing.py` that executes the extracted parser logic against normalized/deduplicated tags, invalid embedded hashtags, and trailing-punctuation cases.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (135 passed)
+- PRD updates made
+  - Refreshed the `US-049` note to mention the invalid-hashtag partial-match guard alongside the existing backend-owned query parsing behavior.
+  - Re-evaluated `EP-007`; it remains `passes: false` because `US-050` through `US-055` are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Treat search hashtags as tags only when they end cleanly, so malformed tokens do not silently change backend filtering semantics.
+  - Gotchas encountered
+    - A generic `[^\w]` hashtag boundary is too permissive here because it treats the `#bad` prefix of `#bad-tag` as a valid filter token and leaves confusing free-text fragments behind.
+  - Useful context
+    - `backend/tests/test_note_query_parsing.py` now executes the parser extracted from `backend/app/domain/notes.py` directly, which keeps the query-shape coverage local without importing the whole backend dependency graph.
+---
+
+## [2026-03-15 11:39:11 +0300] - EP-007 / US-052
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement RU+EN full-text querying using the stored generated search_tsv column
+Thread: CLI run
+- What was implemented
+  - Added `build_note_search_tsquery(...)` plus `list_lexical_search_candidates(...)` in `backend/app/infra/notes.py` so lexical search now targets the stored `notes.search_tsv` column with the fixed RU+EN `websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q)` pattern.
+  - Refactored note filtering in `backend/app/infra/notes.py` through a shared filtered-note-id query helper so folder/tag filters can be reused by both the existing listing path and the new lexical candidate path without drifting.
+  - Added `backend/tests/test_note_fts_search.py` source guards and refreshed `AGENTS.md` with the durable RU+EN `search_tsv` / `ts_rank_cd` repository rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_fts_search.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_fts_search.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app && python -m pytest` ✅ (127 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-052` as passed and added a durable note about the shared RU+EN tsquery builder, `search_tsv`-backed lexical candidate retrieval, and `ts_rank_cd` ordering.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the RU+EN tsquery builder in the note repository layer and reuse the exact same expression for `@@` matching and lexical ranking so PostgreSQL FTS stays aligned with the stored generated `search_tsv` column.
+  - Gotchas encountered
+    - Host-side pytest in this repo does not have SQLAlchemy installed, so search-repository coverage for now needs to stay source-based unless the check is run inside the backend container.
+  - Useful context
+    - `list_lexical_search_candidates(...)` is ready for the later vector/RRF stories to consume after folder/tag filtering, while the public `GET /api/notes` hybrid behavior still waits for the remaining EP-007 stories.
+---
+
+## [2026-03-15 11:33:21 +0300] - EP-007 / US-051
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement embedding generation and dimensionality validation for search_text
+Thread: CLI run
+- What was implemented
+  - Added `NOTE_EMBEDDING_DIMENSION` plus `validate_note_embedding(...)` in `backend/app/domain/pipeline.py` so the fixed `VECTOR(1024)` rule lives in one shared place for note-index embedding writes.
+  - Updated `backend/app/infra/pipeline.py` so finalization still embeds `search_text` through the local Ollama client but now validates the embedding via the shared helper before persisting `notes.embedding`.
+  - Updated `backend/app/workers/tasks.py` so `sematrix.finalize_pipeline` rolls back and routes any embedding/finalization exception through `pipeline_failed(...)`, which keeps direct-finalize runs from getting stuck in `Processing` when embedding validation fails.
+  - Expanded `backend/tests/test_pipeline_finalization.py` with source guards for the shared dimension helper and the finalize-task failure-routing path.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/pipeline.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_pipeline_finalization.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_finalization.py backend/tests/test_pipeline_failure_handling.py backend/tests/test_note_reindex_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (125 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-051` as passed and added a durable note about shared embedding-dimension validation plus finalize-task failure routing for direct-finalize runs.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the RU+EN FTS, vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Route direct finalizer failures back through the shared pipeline failure handler so embedding or summary write errors still land in `Error` even when no stage chord errback is present.
+  - Gotchas encountered
+    - Validating embedding length only inside the finalizer is not enough by itself; zero-stage runs also need the worker task to catch and classify finalizer exceptions or text-only notes can stay stuck in `Processing`.
+  - Useful context
+    - `sematrix.finalize_pipeline` now treats invalid embedding length as a critical finalization failure for both chord-backed and direct-finalize runs, while the later search-query embedding story can reuse the same 1024-dimension helper.
+---
+>>>>>>> ralph/sematrix-mvp-base
 
 ## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
 Epic: Image OCR/caption and secure link processing
@@ -80,8 +277,72 @@ Thread: CLI run
     - Mirror per-object non-critical stage warnings onto the note row as soon as the stage persists its durable result, so REST polling can surface warnings before finalization without changing the final deduplication model.
   - Gotchas encountered
     - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
+- Useful context
+  - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 11:24:18 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Updated `backend/app/domain/notes.py` so the `GET /api/notes` hashtag parser now derives its regex from the shared tag-name validation pattern, keeping search-time `#tag` extraction aligned with backend normalization rules while still stripping valid tag tokens out of the free-text query.
+  - Added `backend/tests/test_note_query_parsing.py` source guards that lock in the shared tag-pattern reuse and the tag-only-search path where the remaining free-text query becomes empty after hashtag removal.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (122 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-049` as passed and added a durable note about reusing the shared tag-name rules for search-query parsing plus preserving inline non-tag hash text and tag-only searches.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the search-document, embedding, FTS, vector, and RRF stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Derive search-query hashtag parsing from the same shared tag-name validator used by save-time normalization so search and persistence cannot silently drift.
+  - Gotchas encountered
+    - Import-heavy runtime tests for `app.domain.notes` are brittle in the host pytest environment here, so lightweight source guards are the safer way to lock in parser wiring without pulling SQLAlchemy-only backend dependencies into the test process.
+- Useful context
+  - `parse_note_query(...)` still returns the same `ParsedNoteQuery` contract, so later hybrid-search stories can consume parsed `text_query` and `tag_names` without changing the public `GET /api/notes` API.
+---
+
+## [2026-03-15 11:28:20 +0300] - EP-007 / US-050
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement search-document construction without summary feedback loops
+Thread: CLI run
+- What was implemented
+  - Reused `app.domain.pipeline.build_search_text(...)` as the shared search-document builder for both phases so meaningful saves now assemble and persist a fast-phase `search_text` from title, flattened content, and tags before background processing begins.
+  - Updated `backend/app/infra/notes.py` to store that fast-phase `search_text` when a note enters `Processing`, while `backend/app/infra/pipeline.py` continues rebuilding the full search document from durable OCR/caption/link outputs during finalization without ever feeding `note.summary` back into the document.
+  - Added `backend/tests/test_search_document.py`, refreshed `backend/tests/test_note_save_api.py`, and recorded the reusable fast-phase/full-phase `search_text` rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_save_api.py`
+  - `backend/tests/test_search_document.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_search_document.py backend/tests/test_note_save_api.py backend/tests/test_pipeline_finalization.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (124 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-050` as passed and added a durable note about the shared search-document builder, save-time fast-phase `search_text`, and finalization-time rebuild from durable enrichment outputs.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the embedding, RU+EN FTS, vector retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Build `search_text` through one shared helper in both phases so save-time indexing and finalization cannot drift while `note.summary` stays excluded from the search document.
+  - Gotchas encountered
+    - Persisting only the fast summary on save is not enough for the hybrid-search epic; `notes.search_text` also has to be written during the save transaction or the stored FTS document stays stale until finalization.
   - Useful context
-    - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+    - `NoteService.save_note(...)` now passes a fast-phase `search_text` into the repository, while `sematrix.finalize_pipeline` still owns the enriched rebuild that adds OCR/caption/link-derived text for the same note version.
 ---
 
 ## [2026-03-15 17:08:39 +0300] - EP-009 / US-070

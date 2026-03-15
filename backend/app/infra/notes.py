@@ -49,6 +49,19 @@ class NoteListRecord:
 
 
 @dataclass(frozen=True)
+class LexicalSearchCandidateRecord:
+    note_id: UUID
+    lexical_rank: float
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class VectorSearchCandidateRecord:
+    note_id: UUID
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class SaveNoteRecord:
     note: NoteRecord
     pipeline_started: bool
@@ -100,6 +113,7 @@ class NoteRepository(Protocol):
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        search_text: str,
         summary: str,
         processing_warnings: list[dict[str, object]],
         request_id: str | None,
@@ -114,6 +128,32 @@ class NoteRepository(Protocol):
         limit: int,
         offset: int,
     ) -> NoteListRecord: ...
+
+    def list_lexical_search_candidates(
+        self,
+        *,
+        text_query: str,
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[LexicalSearchCandidateRecord]: ...
+
+    def list_vector_search_candidates(
+        self,
+        *,
+        query_embedding: list[float],
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[VectorSearchCandidateRecord]: ...
+
+    def list_notes_by_ids(self, note_ids: list[UUID]) -> list[NoteRecord]: ...
+
+
+def build_note_search_tsquery(text_query: str):
+    return func.websearch_to_tsquery("russian", text_query).op("||")(
+        func.websearch_to_tsquery("english", text_query)
+    )
 
 
 class SqlAlchemyNoteRepository:
@@ -230,6 +270,7 @@ class SqlAlchemyNoteRepository:
         asset_ids: list[UUID],
         links: list[ExtractedLink],
         should_start_processing: bool,
+        search_text: str,
         summary: str,
         processing_warnings: list[dict[str, object]],
         request_id: str | None,
@@ -259,6 +300,7 @@ class SqlAlchemyNoteRepository:
         if should_start_processing:
             note.index_version += 1
             note.status = "Processing"
+            note.search_text = search_text
             note.summary = summary
             note.processing_error = None
             note.has_warnings = bool(processing_warnings)
@@ -302,10 +344,7 @@ class SqlAlchemyNoteRepository:
         limit: int,
         offset: int,
     ) -> NoteListRecord:
-        note_ids_query = select(Note.id)
-
-        if folder_id is not None:
-            note_ids_query = note_ids_query.where(Note.folder_id == folder_id)
+        note_ids_query = self._build_filtered_note_ids_query(folder_id=folder_id, tag_names=tag_names)
 
         if text_query:
             pattern = f"%{text_query}%"
@@ -316,15 +355,6 @@ class SqlAlchemyNoteRepository:
                     Note.search_text.ilike(pattern),
                     Note.content_text_flat.ilike(pattern),
                 )
-            )
-
-        if tag_names:
-            note_ids_query = (
-                note_ids_query.join(NoteTag, NoteTag.note_id == Note.id)
-                .join(Tag, Tag.id == NoteTag.tag_id)
-                .where(Tag.name.in_(tag_names))
-                .group_by(Note.id)
-                .having(func.count(func.distinct(Tag.name)) == len(tag_names))
             )
 
         note_ids_subquery = note_ids_query.subquery()
@@ -348,12 +378,104 @@ class SqlAlchemyNoteRepository:
             offset=offset,
         )
 
+    def list_lexical_search_candidates(
+        self,
+        *,
+        text_query: str,
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[LexicalSearchCandidateRecord]:
+        normalized_text_query = " ".join(text_query.split())
+        if not normalized_text_query:
+            return []
+
+        filtered_note_ids = self._build_filtered_note_ids_query(folder_id=folder_id, tag_names=tag_names).subquery()
+        tsquery = build_note_search_tsquery(normalized_text_query)
+        lexical_rank = func.ts_rank_cd(Note.search_tsv, tsquery).label("lexical_rank")
+        rows = self._session.execute(
+            select(Note.id, lexical_rank, Note.updated_at)
+            .where(Note.id.in_(select(filtered_note_ids.c.id)))
+            .where(Note.search_tsv.op("@@")(tsquery))
+            .order_by(lexical_rank.desc(), Note.updated_at.desc(), Note.id.desc())
+            .limit(limit)
+        )
+
+        return [
+            LexicalSearchCandidateRecord(
+                note_id=row.id,
+                lexical_rank=float(row.lexical_rank),
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_vector_search_candidates(
+        self,
+        *,
+        query_embedding: list[float],
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[VectorSearchCandidateRecord]:
+        if not query_embedding:
+            return []
+
+        filtered_note_ids = self._build_filtered_note_ids_query(folder_id=folder_id, tag_names=tag_names).subquery()
+        vector_distance = Note.embedding.cosine_distance(query_embedding).label("vector_distance")
+        rows = self._session.execute(
+            select(Note.id, Note.updated_at, vector_distance)
+            .where(Note.id.in_(select(filtered_note_ids.c.id)))
+            .where(Note.embedding.is_not(None))
+            .order_by(vector_distance.asc(), Note.updated_at.desc(), Note.id.desc())
+            .limit(limit)
+        )
+
+        return [
+            VectorSearchCandidateRecord(
+                note_id=row.id,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_notes_by_ids(self, note_ids: list[UUID]) -> list[NoteRecord]:
+        if not note_ids:
+            return []
+
+        notes = list(
+            self._session.scalars(
+                select(Note)
+                .where(Note.id.in_(note_ids))
+                .options(selectinload(Note.tags))
+            )
+        )
+        return [self._to_record(note) for note in notes]
+
     def _get_note_with_relations(self, note_id: UUID) -> Note | None:
         return self._session.scalar(
             select(Note)
             .where(Note.id == note_id)
             .options(selectinload(Note.tags), selectinload(Note.assets), selectinload(Note.links))
         )
+
+    @staticmethod
+    def _build_filtered_note_ids_query(*, folder_id: UUID | None, tag_names: list[str]):
+        note_ids_query = select(Note.id)
+
+        if folder_id is not None:
+            note_ids_query = note_ids_query.where(Note.folder_id == folder_id)
+
+        if tag_names:
+            note_ids_query = (
+                note_ids_query.join(NoteTag, NoteTag.note_id == Note.id)
+                .join(Tag, Tag.id == NoteTag.tag_id)
+                .where(Tag.name.in_(tag_names))
+                .group_by(Note.id)
+                .having(func.count(func.distinct(Tag.name)) == len(tag_names))
+            )
+
+        return note_ids_query
 
     def _get_note_for_delete(self, note_id: UUID) -> Note | None:
         return self._session.scalar(

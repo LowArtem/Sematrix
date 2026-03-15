@@ -10,12 +10,21 @@ from app.core import get_logger
 from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
 from app.domain.pipeline import build_processing_warning, build_search_text
+from app.domain.search import RankedSearchCandidate, fuse_reciprocal_rank_search
 from app.domain.errors import NotFoundError
-from app.domain.tags import normalize_tag_names
-from app.infra.notes import DraftCleanupRecord, NoteRecord, NoteRepository
+from app.domain.tags import TAG_NAME_PATTERN, normalize_tag_names
+from app.infra.notes import (
+    DraftCleanupRecord,
+    LexicalSearchCandidateRecord,
+    NoteRecord,
+    NoteRepository,
+    VectorSearchCandidateRecord,
+)
 
 
-HASHTAG_PATTERN = re.compile(r"(?<!\w)#([0-9A-Za-z_\u0400-\u04FF]+)")
+TAG_NAME_INNER_PATTERN = TAG_NAME_PATTERN.pattern.removeprefix("^").removesuffix("$")
+HASHTAG_PATTERN = re.compile(rf"(?<!\w)#({TAG_NAME_INNER_PATTERN})(?=$|[\s.,!?;:)\]])")
+TEXT_QUERY_CONTENT_PATTERN = re.compile(r"[0-9A-Za-zА-Яа-яЁё]")
 logger = get_logger(__name__)
 
 
@@ -95,16 +104,26 @@ class NoteGenerationClient(Protocol):
     def generate_title(self, *, content_text_flat: str, tag_names: list[str]) -> str: ...
 
 
+class SemanticSearchClient(Protocol):
+    def embed_text(self, *, text: str) -> list[float]: ...
+
+
 class NoteService:
     def __init__(
         self,
         note_repository: NoteRepository,
         pipeline_dispatcher: PipelineDispatcher,
         note_generation_client: NoteGenerationClient,
+        semantic_search_client: SemanticSearchClient,
+        rrf_k: int,
+        rrf_topn: int,
     ) -> None:
         self._note_repository = note_repository
         self._pipeline_dispatcher = pipeline_dispatcher
         self._note_generation_client = note_generation_client
+        self._semantic_search_client = semantic_search_client
+        self._rrf_k = rrf_k
+        self._rrf_topn = rrf_topn
 
     def create_note(self) -> NoteResult:
         return self._to_result(self._note_repository.create_note())
@@ -146,6 +165,15 @@ class NoteService:
         offset: int,
     ) -> NoteListResult:
         parsed_query = parse_note_query(q)
+        if parsed_query.text_query:
+            return self._list_hybrid_notes(
+                text_query=parsed_query.text_query,
+                tag_names=parsed_query.tag_names,
+                folder_id=folder_id,
+                limit=limit,
+                offset=offset,
+            )
+
         result = self._note_repository.list_notes(
             text_query=parsed_query.text_query,
             tag_names=parsed_query.tag_names,
@@ -158,6 +186,55 @@ class NoteService:
             total=result.total,
             limit=result.limit,
             offset=result.offset,
+        )
+
+    def _list_hybrid_notes(
+        self,
+        *,
+        text_query: str,
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+        offset: int,
+    ) -> NoteListResult:
+        query_embedding = self._semantic_search_client.embed_text(text=text_query)
+        lexical_candidates = self._note_repository.list_lexical_search_candidates(
+            text_query=text_query,
+            tag_names=tag_names,
+            folder_id=folder_id,
+            limit=self._rrf_topn,
+        )
+        vector_candidates = self._note_repository.list_vector_search_candidates(
+            query_embedding=query_embedding,
+            tag_names=tag_names,
+            folder_id=folder_id,
+            limit=self._rrf_topn,
+        )
+        fused_candidates = fuse_reciprocal_rank_search(
+            lexical_candidates=[self._to_ranked_candidate(candidate) for candidate in lexical_candidates],
+            vector_candidates=[self._to_ranked_candidate(candidate) for candidate in vector_candidates],
+            rrf_k=self._rrf_k,
+        )
+        paginated_candidates = fused_candidates[offset : offset + limit]
+        notes_by_id = {
+            note.id: note
+            for note in self._note_repository.list_notes_by_ids(
+                [candidate.note_id for candidate in paginated_candidates]
+            )
+        }
+
+        items: list[NoteCardResult] = []
+        for candidate in paginated_candidates:
+            note = notes_by_id.get(candidate.note_id)
+            if note is None:
+                continue
+            items.append(self._to_card_result(note, score=candidate.score))
+
+        return NoteListResult(
+            items=items,
+            total=len(fused_candidates),
+            limit=limit,
+            offset=offset,
         )
 
     def save_note(
@@ -178,6 +255,7 @@ class NoteService:
             link_count=len(parsed_content.links),
         )
         effective_title = normalized_title
+        search_text = ""
         fast_summary = ""
         processing_warnings: list[dict[str, object]] = []
 
@@ -189,6 +267,13 @@ class NoteService:
                 tag_names=tags,
             )
             processing_warnings.extend(title_warnings)
+            search_text = build_search_text(
+                title=effective_title,
+                content_text_flat=parsed_content.content_text_flat,
+                tag_names=tags,
+                asset_texts=[],
+                link_texts=[],
+            )
             fast_summary, summary_warnings = self._build_fast_summary(
                 note_id=note_id,
                 title=effective_title,
@@ -207,6 +292,7 @@ class NoteService:
             asset_ids=parsed_content.asset_ids,
             links=parsed_content.links,
             should_start_processing=should_start_processing,
+            search_text=search_text,
             summary=fast_summary,
             processing_warnings=processing_warnings,
             request_id=request_id,
@@ -323,7 +409,7 @@ class NoteService:
         )
 
     @staticmethod
-    def _to_card_result(note: NoteRecord) -> NoteCardResult:
+    def _to_card_result(note: NoteRecord, *, score: float | None = None) -> NoteCardResult:
         return NoteCardResult(
             id=note.id,
             title=note.title,
@@ -334,7 +420,16 @@ class NoteService:
             status=note.status,
             has_warnings=note.has_warnings,
             warnings_count=note.warnings_count,
-            score=note.score,
+            score=note.score if score is None else score,
+        )
+
+    @staticmethod
+    def _to_ranked_candidate(
+        candidate: LexicalSearchCandidateRecord | VectorSearchCandidateRecord,
+    ) -> RankedSearchCandidate:
+        return RankedSearchCandidate(
+            note_id=candidate.note_id,
+            updated_at=candidate.updated_at,
         )
 
 
@@ -365,6 +460,8 @@ def parse_note_query(q: str | None) -> ParsedNoteQuery:
     normalized_tag_names = normalize_tag_names(raw_tag_names) if raw_tag_names else []
     text_query = HASHTAG_PATTERN.sub(" ", raw_query)
     normalized_text_query = " ".join(text_query.split())
+    if normalized_text_query and not TEXT_QUERY_CONTENT_PATTERN.search(normalized_text_query):
+        normalized_text_query = ""
 
     return ParsedNoteQuery(
         text_query=normalized_text_query,
