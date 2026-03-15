@@ -34,6 +34,13 @@ export type Folder = {
   notes_count: number | null
 }
 
+export type AsyncAccepted = {
+  id: string
+  status: string
+  index_version: number
+  message: string
+}
+
 export type Asset = {
   id: string
   mime_type: string
@@ -41,22 +48,31 @@ export type Asset = {
   url: string
 }
 
+export type NoteSavePayload = {
+  title: string
+  folder_id: string | null
+  tags: string[]
+  content_json: Record<string, unknown>
+}
+
+export type SaveNoteResponse = NoteDetail | AsyncAccepted
+
+async function readApiError(response: Response): Promise<ApiError> {
+  try {
+    return (await response.json()) as ApiError
+  } catch {
+    return {
+      code: `http_${response.status}`,
+      message: response.statusText || "Request failed",
+    }
+  }
+}
+
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init)
 
   if (!response.ok) {
-    let errorPayload: ApiError | null = null
-
-    try {
-      errorPayload = (await response.json()) as ApiError
-    } catch {
-      errorPayload = null
-    }
-
-    throw errorPayload ?? {
-      code: `http_${response.status}`,
-      message: response.statusText || "Request failed",
-    }
+    throw await readApiError(response)
   }
 
   return (await response.json()) as T
@@ -80,4 +96,33 @@ export function uploadImage(noteId: string, file: File, signal?: AbortSignal): P
     body: formData,
     signal,
   })
+}
+
+export function saveNote(noteId: string, payload: NoteSavePayload, signal?: AbortSignal): Promise<SaveNoteResponse> {
+  return readJson<SaveNoteResponse>(`/api/notes/${noteId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+}
+
+export function reindexNote(noteId: string, signal?: AbortSignal): Promise<AsyncAccepted> {
+  return readJson<AsyncAccepted>(`/api/notes/${noteId}/reindex`, {
+    method: "POST",
+    signal,
+  })
+}
+
+export async function deleteNote(noteId: string, signal?: AbortSignal): Promise<void> {
+  const response = await fetch(`/api/notes/${noteId}`, {
+    method: "DELETE",
+    signal,
+  })
+
+  if (!response.ok) {
+    throw await readApiError(response)
+  }
 }

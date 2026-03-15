@@ -49,6 +49,7 @@
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+- Keep note-screen Save/Reindex/Delete calls in shared `frontend/src/api.ts` helpers and refresh note detail with normal REST reads after accepted mutations so the editor reflects persisted backend state without inventing SSE/WebSocket status logic.
 
 ## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
 Epic: Image OCR/caption and secure link processing
@@ -2057,4 +2058,39 @@ Thread: CLI run
     - A draft tag list needs its own nullable state instead of falling back to the loaded note tags when empty, or removing the last tag will immediately repopulate the original server values.
   - Useful context
     - `frontend/src/App.tsx` now exposes manual tag editing locally on the note screen, which the later Save wiring story can send to `PATCH /api/notes/{id}` without reworking the tag UI structure.
+---
+
+## [2026-03-15 17:30:59 +0300] - EP-009 / US-071
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement Save, Delete with confirm, and Reindex actions on the note screen
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/api.ts` with shared note-mutation helpers for `PATCH /api/notes/{id}`, `POST /api/notes/{id}/reindex`, and `DELETE /api/notes/{id}` plus the `AsyncAccepted`/save-payload types needed by the note screen.
+  - Updated `frontend/src/App.tsx` so the note screen now edits title and folder locally, sends title/folder/tags/editor `content_json` on Save, asks for explicit confirmation before Delete, redirects home after deletion, and refreshes note detail through REST after accepted Save/Reindex responses so the UI stays aligned with persisted backend status.
+  - Added frontend source-guard coverage in `backend/tests/test_note_editor_actions.py`, refreshed `backend/tests/test_note_detail_screen.py`, and recorded the reusable mutation-helper/REST-refresh pattern in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_actions.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_actions.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (139 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-071` as passed and added a durable note about shared frontend mutation helpers, destructive Delete confirmation, and REST refresh after Save/Reindex acceptance.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering and note-screen warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-screen mutations behind shared API helpers and refresh the note detail after accepted mutations so the editor stays REST-driven even while Processing continues asynchronously.
+  - Gotchas encountered
+    - Save can return either `200 NoteDetailDto` or `202 AsyncAcceptedDto`, so the frontend has to handle both response shapes instead of assuming a single payload type.
+  - Useful context
+    - The editor screen now owns draft title/folder/tag/content state locally, while `GET /api/notes/{id}` remains the source of truth used to resync status and persisted content after Save/Reindex calls.
 ---

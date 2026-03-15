@@ -5,8 +5,12 @@ import { EditorContent, useEditor } from "@tiptap/react"
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 
 import {
+  deleteNote,
   getNoteDetail,
   listFolders,
+  reindexNote,
+  saveNote,
+  type AsyncAccepted,
   uploadImage,
   type ApiError,
   type Asset,
@@ -31,6 +35,11 @@ type TagAutoConvertRequest = {
 
 type TagAutoConvertRollbackHandle = {
   rollbackLatestAutoConvert: () => boolean
+}
+
+type ActionNotice = {
+  tone: "success" | "error"
+  message: string
 }
 
 const TAG_AUTO_CONVERT_PATTERN = /(^|[\s([{])#([0-9A-Za-zА-Яа-яЁё_]+)$/
@@ -81,6 +90,15 @@ function statusTone(status: string): string {
     default:
       return "is-draft"
   }
+}
+
+function isAsyncAccepted(response: NoteDetail | AsyncAccepted): response is AsyncAccepted {
+  return "message" in response
+}
+
+async function loadNoteScreenData(noteId: string, signal?: AbortSignal): Promise<{ note: NoteDetail; folders: Folder[] }> {
+  const [note, folders] = await Promise.all([getNoteDetail(noteId, signal), listFolders(signal)])
+  return { note, folders }
 }
 
 function EditorToolbarButton({
@@ -479,6 +497,8 @@ function AppHome() {
 
 function NoteScreen({ noteId }: { noteId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" })
+  const [draftTitle, setDraftTitle] = useState("")
+  const [draftFolderId, setDraftFolderId] = useState<string | null>(null)
   const [draftContentJson, setDraftContentJson] = useState<Record<string, unknown> | null>(null)
   const [draftTags, setDraftTags] = useState<string[] | null>(null)
   const [pendingAutoConvertRollback, setPendingAutoConvertRollback] = useState<{
@@ -487,23 +507,46 @@ function NoteScreen({ noteId }: { noteId: string }) {
   } | null>(null)
   const [tagInput, setTagInput] = useState("")
   const [tagError, setTagError] = useState<string | null>(null)
+  const [activeAction, setActiveAction] = useState<"saving" | "reindexing" | "deleting" | null>(null)
+  const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null)
   const editorRef = useRef<TagAutoConvertRollbackHandle | null>(null)
   const tagInputRef = useRef<HTMLInputElement | null>(null)
+
+  function applyLoadedNote(nextNote: NoteDetail): void {
+    setDraftTitle(nextNote.title)
+    setDraftFolderId(nextNote.folder_id)
+    setDraftContentJson(nextNote.content_json)
+    setDraftTags(normalizeTagNames(nextNote.tags.map((tag) => tag.name)))
+    setPendingAutoConvertRollback(null)
+    setTagInput("")
+    setTagError(null)
+  }
+
+  function updateLoadedNote(nextNote: NoteDetail, folders: Folder[]): void {
+    applyLoadedNote(nextNote)
+    setState({ status: "ready", note: nextNote, folders })
+  }
+
+  async function refreshLoadedNote(folders: Folder[]): Promise<NoteDetail | null> {
+    try {
+      const refreshedNote = await getNoteDetail(noteId)
+      updateLoadedNote(refreshedNote, folders)
+      return refreshedNote
+    } catch {
+      return null
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController()
 
     setState({ status: "loading" })
 
-    Promise.all([getNoteDetail(noteId, controller.signal), listFolders(controller.signal)])
-      .then(([note, folders]) => {
+    loadNoteScreenData(noteId, controller.signal)
+      .then(({ note, folders }) => {
         if (!controller.signal.aborted) {
-          setDraftContentJson(note.content_json)
-          setDraftTags(normalizeTagNames(note.tags.map((tag) => tag.name)))
-          setPendingAutoConvertRollback(null)
-          setTagInput("")
-          setTagError(null)
-          setState({ status: "ready", note, folders })
+          updateLoadedNote(note, folders)
+          setActionNotice(null)
         }
       })
       .catch((error: unknown) => {
@@ -544,12 +587,105 @@ function NoteScreen({ noteId }: { noteId: string }) {
   }
 
   const { note, folders } = state
+  const displayedTitle = draftTitle
+  const displayedFolderId = draftFolderId
   const editorContentJson = draftContentJson ?? note.content_json
   const displayedTags = draftTags ?? normalizeTagNames(note.tags.map((tag) => tag.name))
   const serializedContentJson = JSON.stringify(editorContentJson, null, 2)
 
   function clearPendingAutoConvertRollback(): void {
     setPendingAutoConvertRollback(null)
+  }
+
+  async function handleSave(): Promise<void> {
+    setActiveAction("saving")
+    setActionNotice(null)
+
+    try {
+      const response = await saveNote(note.id, {
+        title: draftTitle,
+        folder_id: draftFolderId,
+        tags: displayedTags,
+        content_json: editorContentJson,
+      })
+
+      if (isAsyncAccepted(response)) {
+        const refreshedNote = await refreshLoadedNote(folders)
+        if (!refreshedNote) {
+          setState({
+            status: "ready",
+            note: {
+              ...note,
+              title: draftTitle,
+              folder_id: draftFolderId,
+              tags: displayedTags.map((tagName) => {
+                const existingTag = note.tags.find((tag) => tag.name === tagName)
+                return existingTag ?? { id: `draft-${tagName}`, name: tagName }
+              }),
+              content_json: editorContentJson,
+              status: response.status,
+              index_version: response.index_version,
+            },
+            folders,
+          })
+        }
+
+        setActionNotice({ tone: "success", message: response.message })
+        return
+      }
+
+      updateLoadedNote(response, folders)
+      setActionNotice({ tone: "success", message: "Note saved without starting background processing." })
+    } catch (error) {
+      setActionNotice({ tone: "error", message: toApiError(error).message })
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
+  async function handleReindex(): Promise<void> {
+    setActiveAction("reindexing")
+    setActionNotice(null)
+
+    try {
+      const response = await reindexNote(note.id)
+      const refreshedNote = await refreshLoadedNote(folders)
+
+      if (!refreshedNote) {
+        setState({
+          status: "ready",
+          note: {
+            ...note,
+            status: response.status,
+            index_version: response.index_version,
+          },
+          folders,
+        })
+      }
+
+      setActionNotice({ tone: "success", message: response.message })
+    } catch (error) {
+      setActionNotice({ tone: "error", message: toApiError(error).message })
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
+  async function handleDelete(): Promise<void> {
+    if (!window.confirm("Delete this note permanently?")) {
+      return
+    }
+
+    setActiveAction("deleting")
+    setActionNotice(null)
+
+    try {
+      await deleteNote(note.id)
+      window.location.assign("/")
+    } catch (error) {
+      setActionNotice({ tone: "error", message: toApiError(error).message })
+      setActiveAction(null)
+    }
   }
 
   function rollbackLatestAutoConvert(): void {
@@ -621,7 +757,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
             Back to workspace
           </a>
           <p className="overline">Note Detail</p>
-          <h1>{note.title || "Untitled draft"}</h1>
+          <h1>{displayedTitle || "Untitled draft"}</h1>
           <p className="lead-copy">
             This screen loads the public <code>NoteDetailDto</code> contract and keeps
             folders, status, warnings, and editor content in one REST-backed view.
@@ -641,13 +777,17 @@ function NoteScreen({ noteId }: { noteId: string }) {
         <article className="library-card detail-card">
           <label className="field-block">
             <span className="field-label">Title</span>
-            <input className="text-field" value={note.title} readOnly />
+            <input className="text-field" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
           </label>
 
           <div className="field-row">
             <label className="field-block">
               <span className="field-label">Folder</span>
-              <select className="text-field" value={note.folder_id ?? ""} disabled>
+              <select
+                className="text-field"
+                value={displayedFolderId ?? ""}
+                onChange={(event) => setDraftFolderId(event.target.value || null)}
+              >
                 <option value="">No folder</option>
                 {folders.map((folder) => (
                   <option key={folder.id} value={folder.id}>
@@ -750,15 +890,36 @@ function NoteScreen({ noteId }: { noteId: string }) {
             <textarea className="editor-surface" value={serializedContentJson} readOnly />
           </section>
 
+          {actionNotice ? (
+            <p className={`action-notice ${actionNotice.tone === "error" ? "is-error" : "is-success"}`}>
+              {actionNotice.message}
+            </p>
+          ) : null}
+
           <div className="action-row">
-            <button className="action-button primary-action" type="button" disabled>
-              Save
+            <button
+              className="action-button primary-action"
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={activeAction !== null}
+            >
+              {activeAction === "saving" ? "Saving..." : "Save"}
             </button>
-            <button className="action-button" type="button" disabled>
-              Reindex
+            <button
+              className="action-button"
+              type="button"
+              onClick={() => void handleReindex()}
+              disabled={activeAction !== null}
+            >
+              {activeAction === "reindexing" ? "Reindexing..." : "Reindex"}
             </button>
-            <button className="action-button danger-action" type="button" disabled>
-              Delete
+            <button
+              className="action-button danger-action"
+              type="button"
+              onClick={() => void handleDelete()}
+              disabled={activeAction !== null}
+            >
+              {activeAction === "deleting" ? "Deleting..." : "Delete"}
             </button>
           </div>
         </article>

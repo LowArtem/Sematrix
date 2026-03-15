@@ -449,6 +449,26 @@ h1 {
   margin-top: 1.25rem;
 }
 
+.action-notice {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-strong);
+}
+
+.action-notice.is-success {
+  color: var(--ready);
+  border-color: rgba(56, 114, 85, 0.22);
+  background: rgba(226, 247, 235, 0.72);
+}
+
+.action-notice.is-error {
+  color: var(--error);
+  border-color: rgba(161, 72, 56, 0.22);
+  background: rgba(252, 232, 228, 0.72);
+}
+
 .action-button {
   min-width: 128px;
   border: 1px solid var(--line);

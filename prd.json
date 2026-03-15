@@ -1125,8 +1125,8 @@
             "The frontend handles 200 Draft and 202 Processing responses from Save correctly"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires Delete confirmation and a separate Reindex action."
+          "passes": true,
+          "notes": "The spec explicitly requires Delete confirmation and a separate Reindex action. The note screen now routes Save/Delete/Reindex through shared `frontend/src/api.ts` helpers, sends title/folder/tags/editor `content_json` on Save, asks for explicit destructive confirmation before Delete, redirects home after a successful delete, and refreshes note detail through normal REST reads after Save/Reindex acceptances so 200 Draft and 202 Processing responses both leave the UI aligned with persisted backend state."
         },
         {
           "id": "US-072",
@@ -1144,7 +1144,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, image insertion flows, manual tag editing, and one-transaction `#tag` auto-conversion are now in place, but the epic remains open until inline image rendering, auto-conversion rollback, save-delete-reindex wiring, and warning-detail stories are finished."
+      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, image insertion flows, manual tag editing, `#tag` auto-conversion with rollback, and Save/Delete/Reindex wiring are now in place, but the epic remains open until the inline image rendering and warning-detail stories are finished."
     },
     {
       "id": "EP-010",

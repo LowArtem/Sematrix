@@ -25,7 +25,9 @@ def test_note_detail_screen_loads_note_and_folder_data_from_public_api() -> None
     assert 'return readJson<NoteDetail>(`/api/notes/${noteId}`, { signal })' in api_source
     assert "export function listFolders(signal?: AbortSignal): Promise<Folder[]>" in api_source
     assert 'return readJson<Folder[]>("/api/folders", { signal })' in api_source
-    assert "Promise.all([getNoteDetail(noteId, controller.signal), listFolders(controller.signal)])" in app_source
+    assert "async function loadNoteScreenData(noteId: string, signal?: AbortSignal): Promise<{ note: NoteDetail; folders: Folder[] }>" in app_source
+    assert "const [note, folders] = await Promise.all([getNoteDetail(noteId, signal), listFolders(signal)])" in app_source
+    assert "loadNoteScreenData(noteId, controller.signal)" in app_source
     assert 'return { kind: "note", noteId: noteMatch[1] }' in app_source
 
 
@@ -38,7 +40,10 @@ def test_note_detail_screen_renders_note_fields_and_action_layout() -> None:
     assert '<span className="field-label">Editor Content</span>' in app_source
     assert '<span className="field-label">Warnings</span>' in app_source
     assert '<span className="field-label">Processing Error</span>' in app_source
-    assert 'className="action-button primary-action" type="button" disabled>' in app_source
+    assert 'className="action-button primary-action"' in app_source
+    assert 'onClick={() => void handleSave()}' in app_source
+    assert 'onClick={() => void handleReindex()}' in app_source
+    assert 'onClick={() => void handleDelete()}' in app_source
     assert "Save" in app_source
     assert "Reindex" in app_source
     assert "Delete" in app_source
@@ -57,4 +62,5 @@ def test_note_detail_screen_surfaces_backend_error_message_for_unknown_note() ->
     assert "function toApiError(error: unknown): ApiError" in app_source
     assert '<p className="error-meta">Error code: {state.error.code}</p>' in app_source
     assert 'message: response.statusText || "Request failed"' in api_source
-    assert 'throw errorPayload ?? {' in api_source
+    assert 'async function readApiError(response: Response): Promise<ApiError>' in api_source
+    assert 'throw await readApiError(response)' in api_source
