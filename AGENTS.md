@@ -169,6 +169,7 @@ Do not move business logic into route handlers or UI code.
 - Frontend must not implement backend indexing logic locally.
 - Keep the Tiptap extension set centralized in the note-editor UI and derive outgoing `content_json` from `editor.getJSON()` there, so later note actions reuse one frontend source of truth instead of hand-building document payloads.
 - Keep note-editor image insertion behind one frontend upload helper that posts to `/api/assets/image` and always inserts assetId-backed Tiptap image nodes, so toolbar upload, drag-drop, and paste flows cannot drift into data-URL storage.
+- Keep note-editor tag editing and later `#tag` auto-conversion on one shared frontend normalization helper that mirrors the backend lowercase/no-spaces/allowed-characters rules for UX, while the backend remains the final source of truth.
 - MVP status updates are **REST-based only**. Do not add SSE/WebSocket status streaming unless explicitly requested.
 
 ---

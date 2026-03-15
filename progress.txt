@@ -25,6 +25,7 @@
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
+- Keep note-editor tag normalization in one frontend helper that mirrors the backend lowercase/no-spaces/allowed-character rules, so manual tag entry and later `#tag` auto-conversion reuse the same UX guardrails without changing backend ownership.
 - Keep the Draft-versus-Processing decision in a shared domain helper so save flows and later Draft-cleanup logic can reuse the exact meaningful-content rule.
 - Keep Draft reset defaults in a shared domain helper so empty saves clear `summary`, `search_text`, `embedding`, and warning/error fields consistently whenever a note falls back to `Draft`.
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
@@ -1955,4 +1956,39 @@ Thread: CLI run
     - Using raw `note_assets` rows as the cleanup signal would incorrectly preserve abandoned Drafts that uploaded images before the first meaningful Save.
   - Useful context
     - The cleanup path now logs candidate/deleted/error counts in structured JSON, so later operations work can monitor beat-driven Draft cleanup without adding new logging infrastructure.
+---
+
+## [2026-03-15 13:08:45 +0300] - EP-009 / US-068
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement manual tag management UI on the note screen
+Thread: CLI run
+- What was implemented
+  - Added a shared frontend tag helper in `frontend/src/tags.ts` that trims, lowercases, validates, and deduplicates tag names with the same Latin/Cyrillic/digit/underscore rules used by the backend.
+  - Updated `frontend/src/App.tsx` so the note screen now keeps editable draft tags, renders removable tag chips, provides a dedicated add-tag input with Enter/button submit, and shows inline validation feedback instead of the old read-only tag field.
+  - Refreshed note-editor styling in `frontend/src/styles.css`, added `backend/tests/test_note_editor_tags.py`, and updated the existing image-editor source guard after switching inline image insertion to a type-safe `insertContent(...)` call that still preserves `assetId` attrs.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_editor_images.py`
+  - `backend/tests/test_note_editor_tags.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/tags.ts`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tiptap.py backend/tests/test_note_editor_images.py` ✅
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (131 passed)
+- PRD updates made
+  - Marked `US-068` as passed and added a durable note about the shared frontend tag-normalization helper plus the editable chip/input tag UI.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, tag auto-conversion/rollback, action wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-editor tag normalization in one frontend helper so manual tag editing and later `#tag` auto-conversion share the same UX rules while the backend stays authoritative.
+  - Gotchas encountered
+    - A draft tag list needs its own nullable state instead of falling back to the loaded note tags when empty, or removing the last tag will immediately repopulate the original server values.
+  - Useful context
+    - `frontend/src/App.tsx` now exposes manual tag editing locally on the note screen, which the later Save wiring story can send to `PATCH /api/notes/{id}` without reworking the tag UI structure.
 ---

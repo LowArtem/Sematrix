@@ -13,6 +13,7 @@ import {
   type Folder,
   type NoteDetail,
 } from "./api"
+import { normalizeTagName, normalizeTagNames } from "./tags"
 
 type Route =
   | { kind: "home" }
@@ -181,10 +182,12 @@ function NoteEditor({
       return
     }
 
+    const imageAttributes = { src: asset.url, alt: assetAlt, assetId: asset.id }
+
     editor
       .chain()
       .focus()
-      .setImage({ src: asset.url, alt: assetAlt, assetId: asset.id })
+      .insertContent({ type: "image", attrs: imageAttributes })
       .run()
   }
 
@@ -361,6 +364,9 @@ function AppHome() {
 function NoteScreen({ noteId }: { noteId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" })
   const [draftContentJson, setDraftContentJson] = useState<Record<string, unknown> | null>(null)
+  const [draftTags, setDraftTags] = useState<string[] | null>(null)
+  const [tagInput, setTagInput] = useState("")
+  const [tagError, setTagError] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -371,6 +377,9 @@ function NoteScreen({ noteId }: { noteId: string }) {
       .then(([note, folders]) => {
         if (!controller.signal.aborted) {
           setDraftContentJson(note.content_json)
+          setDraftTags(normalizeTagNames(note.tags.map((tag) => tag.name)))
+          setTagInput("")
+          setTagError(null)
           setState({ status: "ready", note, folders })
         }
       })
@@ -413,7 +422,30 @@ function NoteScreen({ noteId }: { noteId: string }) {
 
   const { note, folders } = state
   const editorContentJson = draftContentJson ?? note.content_json
+  const displayedTags = draftTags ?? normalizeTagNames(note.tags.map((tag) => tag.name))
   const serializedContentJson = JSON.stringify(editorContentJson, null, 2)
+
+  function handleAddTag(): void {
+    try {
+      const normalizedTag = normalizeTagName(tagInput)
+
+      if (displayedTags.includes(normalizedTag)) {
+        setTagError("This tag is already on the note")
+        return
+      }
+
+      setDraftTags((currentTags) => [...(currentTags ?? []), normalizedTag])
+      setTagInput("")
+      setTagError(null)
+    } catch (error) {
+      setTagError(error instanceof Error ? error.message : "Unable to add tag")
+    }
+  }
+
+  function handleRemoveTag(tagName: string): void {
+    setDraftTags((currentTags) => (currentTags ?? []).filter((currentTag) => currentTag !== tagName))
+    setTagError(null)
+  }
 
   return (
     <main className="note-shell">
@@ -470,24 +502,54 @@ function NoteScreen({ noteId }: { noteId: string }) {
           <section className="field-block">
             <div className="section-heading">
               <span className="field-label">Tags</span>
-              <span className="section-caption">Loaded from NoteDetailDto</span>
+              <span className="section-caption">Add tags manually with backend-matching rules</span>
             </div>
             <div className="tag-strip">
-              {note.tags.length ? (
-                note.tags.map((tag) => (
-                  <span key={tag.id} className="tag-chip">
-                    #{tag.name}
-                  </span>
+              {displayedTags.length ? (
+                displayedTags.map((tagName) => (
+                  <button
+                    key={tagName}
+                    className="tag-chip tag-chip-button"
+                    type="button"
+                    onClick={() => handleRemoveTag(tagName)}
+                  >
+                    <span>#{tagName}</span>
+                    <span className="tag-chip-remove" aria-hidden="true">
+                      ×
+                    </span>
+                  </button>
                 ))
               ) : (
                 <span className="empty-chip">No tags yet</span>
               )}
             </div>
-            <input
-              className="text-field"
-              value={note.tags.map((tag) => `#${tag.name}`).join(", ")}
-              readOnly
-            />
+
+            <div className="tag-editor-row">
+              <input
+                className="text-field"
+                value={tagInput}
+                onChange={(event) => {
+                  setTagInput(event.target.value)
+                  if (tagError) {
+                    setTagError(null)
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    handleAddTag()
+                  }
+                }}
+                placeholder="Add a tag like research_notes"
+                aria-label="Add a tag"
+              />
+              <button className="action-button tag-add-button" type="button" onClick={handleAddTag}>
+                Add tag
+              </button>
+            </div>
+
+            <p className="field-hint">Tags are trimmed, lowercased, and may use Latin/Cyrillic letters, digits, and underscore.</p>
+            {tagError ? <p className="field-error">{tagError}</p> : null}
           </section>
 
           <section className="field-block">

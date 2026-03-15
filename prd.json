@@ -1083,8 +1083,8 @@
             "The UI respects backend normalization/validation rules"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The tags block is required separately from text auto-conversion. Tags are created on first use."
+          "passes": true,
+          "notes": "The tags block is required separately from text auto-conversion. Tags are created on first use. The note screen now keeps a dedicated manual tag area with removable chips plus an add-tag input, and reuses a shared frontend normalization helper that trims, lowercases, validates, and deduplicates tag names with the same Latin/Cyrillic/digit/underscore rules enforced on the backend."
         },
         {
           "id": "US-069",
@@ -1144,7 +1144,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec."
+      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, image insertion flows, and manual tag editing are now in place, but the epic remains open until inline image rendering, tag auto-conversion/rollback, save-delete-reindex wiring, and warning-detail stories are finished."
     },
     {
       "id": "EP-010",

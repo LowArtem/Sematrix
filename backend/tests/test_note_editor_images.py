@@ -21,7 +21,8 @@ def test_note_editor_reuses_one_assetid_image_node_for_all_insert_flows() -> Non
     assert "const AssetImage = Image.extend({" in app_source
     assert 'parseHTML: (element) => element.getAttribute("data-asset-id")' in app_source
     assert 'return { "data-asset-id": String(attributes.assetId) }' in app_source
-    assert '.setImage({ src: asset.url, alt: assetAlt, assetId: asset.id })' in app_source
+    assert 'const imageAttributes = { src: asset.url, alt: assetAlt, assetId: asset.id }' in app_source
+    assert '.insertContent({ type: "image", attrs: imageAttributes })' in app_source
     assert 'const imageFiles = extractImageFiles(event.clipboardData?.files ?? null)' in app_source
     assert 'const imageFiles = extractImageFiles(event.dataTransfer?.files ?? null)' in app_source
     assert 'const imageFiles = extractImageFiles(event.target.files)' in app_source
