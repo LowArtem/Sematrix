@@ -11,11 +11,12 @@ from app.domain.note_lifecycle import has_meaningful_content
 from app.domain.note_content import parse_note_content
 from app.domain.pipeline import build_processing_warning, build_search_text
 from app.domain.errors import NotFoundError
-from app.domain.tags import normalize_tag_names
+from app.domain.tags import TAG_NAME_PATTERN, normalize_tag_names
 from app.infra.notes import DraftCleanupRecord, NoteRecord, NoteRepository
 
 
-HASHTAG_PATTERN = re.compile(r"(?<!\w)#([0-9A-Za-z_\u0400-\u04FF]+)")
+TAG_NAME_INNER_PATTERN = TAG_NAME_PATTERN.pattern.removeprefix("^").removesuffix("$")
+HASHTAG_PATTERN = re.compile(rf"(?<!\w)#({TAG_NAME_INNER_PATTERN})(?=$|[^\w])")
 logger = get_logger(__name__)
 
 

@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Derive `GET /api/notes` hashtag parsing from the shared tag-name validator so search-time `#tag` extraction stays aligned with backend tag normalization rules.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -73,8 +74,38 @@ Thread: CLI run
     - Mirror per-object non-critical stage warnings onto the note row as soon as the stage persists its durable result, so REST polling can surface warnings before finalization without changing the final deduplication model.
   - Gotchas encountered
     - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
+- Useful context
+  - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 11:24:18 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Updated `backend/app/domain/notes.py` so the `GET /api/notes` hashtag parser now derives its regex from the shared tag-name validation pattern, keeping search-time `#tag` extraction aligned with backend normalization rules while still stripping valid tag tokens out of the free-text query.
+  - Added `backend/tests/test_note_query_parsing.py` source guards that lock in the shared tag-pattern reuse and the tag-only-search path where the remaining free-text query becomes empty after hashtag removal.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (122 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-049` as passed and added a durable note about reusing the shared tag-name rules for search-query parsing plus preserving inline non-tag hash text and tag-only searches.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the search-document, embedding, FTS, vector, and RRF stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Derive search-query hashtag parsing from the same shared tag-name validator used by save-time normalization so search and persistence cannot silently drift.
+  - Gotchas encountered
+    - Import-heavy runtime tests for `app.domain.notes` are brittle in the host pytest environment here, so lightweight source guards are the safer way to lock in parser wiring without pulling SQLAlchemy-only backend dependencies into the test process.
   - Useful context
-    - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+    - `parse_note_query(...)` still returns the same `ParsedNoteQuery` contract, so later hybrid-search stories can consume parsed `text_query` and `tag_names` without changing the public `GET /api/notes` API.
 ---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046

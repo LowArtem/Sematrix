@@ -792,8 +792,8 @@
             "Multiple tags are applied with AND semantics"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The frontend search field is intentionally simple; all parsing and semantics are handled on the backend."
+          "passes": true,
+          "notes": "The frontend search field is intentionally simple; all parsing and semantics are handled on the backend. `app.domain.notes.parse_note_query(...)` now derives its hashtag regex from the shared tag-name validator so GET /api/notes extracts valid `#tag` filters with the same lowercase/underscore/Cyrillic-Latin rules used by tag persistence, while leaving inline non-tag hash text in the free-text query and preserving empty-text tag-only searches."
         },
         {
           "id": "US-050",
