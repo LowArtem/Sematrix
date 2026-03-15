@@ -2,7 +2,7 @@ import Image from "@tiptap/extension-image"
 import Link from "@tiptap/extension-link"
 import StarterKit from "@tiptap/starter-kit"
 import { EditorContent, useEditor } from "@tiptap/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 
 import {
   getNoteDetail,
@@ -27,6 +27,10 @@ type LoadState =
 type TagAutoConvertRequest = {
   normalizedTag: string
   completionText: string
+}
+
+type TagAutoConvertRollbackHandle = {
+  rollbackLatestAutoConvert: () => boolean
 }
 
 const TAG_AUTO_CONVERT_PATTERN = /(^|[\s([{])#([0-9A-Za-zА-Яа-яЁё_]+)$/
@@ -141,22 +145,27 @@ function getAutoConvertCompletionText(event: KeyboardEvent): string | null {
   return null
 }
 
-function NoteEditor({
-  noteId,
-  contentJson,
-  onAutoConvertTag,
-  onContentChange,
-}: {
+const NoteEditor = forwardRef<TagAutoConvertRollbackHandle, {
   noteId: string
   contentJson: Record<string, unknown>
   onAutoConvertTag: (request: TagAutoConvertRequest) => void
+  onClearAutoConvertRollback: () => void
   onContentChange: (nextContent: Record<string, unknown>) => void
-}) {
+}>(function NoteEditor({
+  noteId,
+  contentJson,
+  onAutoConvertTag,
+  onClearAutoConvertRollback,
+  onContentChange,
+}, ref) {
   const [uploadState, setUploadState] = useState<{ status: "idle" | "uploading" | "error"; message: string }>({
     status: "idle",
     message: "",
   })
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const isApplyingAutoConvertRef = useRef(false)
+  const isRollingBackAutoConvertRef = useRef(false)
+  const canRollbackAutoConvertRef = useRef(false)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -209,6 +218,7 @@ function NoteEditor({
           const deleteTo = selection.from
 
           event.preventDefault()
+          isApplyingAutoConvertRef.current = true
           editor
             .chain()
             .focus()
@@ -252,8 +262,36 @@ function NoteEditor({
     },
     onUpdate: ({ editor: nextEditor }) => {
       onContentChange(nextEditor.getJSON() as Record<string, unknown>)
+
+      if (isApplyingAutoConvertRef.current) {
+        isApplyingAutoConvertRef.current = false
+        canRollbackAutoConvertRef.current = true
+        return
+      }
+
+      if (isRollingBackAutoConvertRef.current) {
+        isRollingBackAutoConvertRef.current = false
+        return
+      }
+
+      if (canRollbackAutoConvertRef.current) {
+        canRollbackAutoConvertRef.current = false
+        onClearAutoConvertRollback()
+      }
     },
   })
+
+  useImperativeHandle(ref, () => ({
+    rollbackLatestAutoConvert: () => {
+      if (!editor || !canRollbackAutoConvertRef.current) {
+        return false
+      }
+
+      canRollbackAutoConvertRef.current = false
+      isRollingBackAutoConvertRef.current = true
+      return editor.chain().focus().undo().run()
+    },
+  }), [editor])
 
   const insertUploadedImage = (asset: Asset, assetAlt: string) => {
     if (!editor) {
@@ -419,7 +457,7 @@ function NoteEditor({
       ) : null}
     </div>
   )
-}
+})
 
 function AppHome() {
   return (
@@ -443,8 +481,13 @@ function NoteScreen({ noteId }: { noteId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" })
   const [draftContentJson, setDraftContentJson] = useState<Record<string, unknown> | null>(null)
   const [draftTags, setDraftTags] = useState<string[] | null>(null)
+  const [pendingAutoConvertRollback, setPendingAutoConvertRollback] = useState<{
+    normalizedTag: string
+    tagWasAdded: boolean
+  } | null>(null)
   const [tagInput, setTagInput] = useState("")
   const [tagError, setTagError] = useState<string | null>(null)
+  const editorRef = useRef<TagAutoConvertRollbackHandle | null>(null)
   const tagInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -457,6 +500,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
         if (!controller.signal.aborted) {
           setDraftContentJson(note.content_json)
           setDraftTags(normalizeTagNames(note.tags.map((tag) => tag.name)))
+          setPendingAutoConvertRollback(null)
           setTagInput("")
           setTagError(null)
           setState({ status: "ready", note, folders })
@@ -504,6 +548,36 @@ function NoteScreen({ noteId }: { noteId: string }) {
   const displayedTags = draftTags ?? normalizeTagNames(note.tags.map((tag) => tag.name))
   const serializedContentJson = JSON.stringify(editorContentJson, null, 2)
 
+  function clearPendingAutoConvertRollback(): void {
+    setPendingAutoConvertRollback(null)
+  }
+
+  function rollbackLatestAutoConvert(): void {
+    if (!pendingAutoConvertRollback) {
+      return
+    }
+
+    const rollbackApplied = editorRef.current?.rollbackLatestAutoConvert()
+    if (!rollbackApplied) {
+      setPendingAutoConvertRollback(null)
+      return
+    }
+
+    if (pendingAutoConvertRollback.tagWasAdded) {
+      setDraftTags((currentTags) =>
+        normalizeTagNames(
+          (currentTags ?? displayedTags).filter(
+            (currentTag) => currentTag !== pendingAutoConvertRollback.normalizedTag,
+          ),
+        ),
+      )
+    }
+
+    setPendingAutoConvertRollback(null)
+    setTagInput("")
+    setTagError(null)
+  }
+
   function handleAddTag(): void {
     try {
       const normalizedTag = normalizeTagName(tagInput)
@@ -514,6 +588,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
       }
 
       setDraftTags((currentTags) => [...(currentTags ?? []), normalizedTag])
+      clearPendingAutoConvertRollback()
       setTagInput("")
       setTagError(null)
     } catch (error) {
@@ -523,11 +598,14 @@ function NoteScreen({ noteId }: { noteId: string }) {
 
   function handleRemoveTag(tagName: string): void {
     setDraftTags((currentTags) => (currentTags ?? []).filter((currentTag) => currentTag !== tagName))
+    clearPendingAutoConvertRollback()
     setTagError(null)
   }
 
   function handleAutoConvertTag({ normalizedTag }: TagAutoConvertRequest): void {
+    const tagWasAdded = !displayedTags.includes(normalizedTag)
     setDraftTags((currentTags) => normalizeTagNames([...(currentTags ?? displayedTags), normalizedTag]))
+    setPendingAutoConvertRollback({ normalizedTag, tagWasAdded })
     setTagInput("")
     setTagError(null)
     window.setTimeout(() => {
@@ -619,11 +697,26 @@ function NoteScreen({ noteId }: { noteId: string }) {
                 value={tagInput}
                 onChange={(event) => {
                   setTagInput(event.target.value)
+                  if (pendingAutoConvertRollback) {
+                    clearPendingAutoConvertRollback()
+                  }
                   if (tagError) {
                     setTagError(null)
                   }
                 }}
                 onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && pendingAutoConvertRollback) {
+                    event.preventDefault()
+                    rollbackLatestAutoConvert()
+                    return
+                  }
+
+                  if (event.key === "Backspace" && !tagInput && pendingAutoConvertRollback) {
+                    event.preventDefault()
+                    rollbackLatestAutoConvert()
+                    return
+                  }
+
                   if (event.key === "Enter") {
                     event.preventDefault()
                     handleAddTag()
@@ -647,9 +740,11 @@ function NoteScreen({ noteId }: { noteId: string }) {
               <span className="section-caption">Type a valid #tag and finish with space, Enter, or punctuation to convert it into a note tag.</span>
             </div>
             <NoteEditor
+              ref={editorRef}
               noteId={note.id}
               contentJson={editorContentJson}
               onAutoConvertTag={handleAutoConvertTag}
+              onClearAutoConvertRollback={clearPendingAutoConvertRollback}
               onContentChange={setDraftContentJson}
             />
             <textarea className="editor-surface" value={serializedContentJson} readOnly />

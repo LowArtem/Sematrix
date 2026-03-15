@@ -82,6 +82,37 @@ Thread: CLI run
     - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
 ---
 
+## [2026-03-15 17:08:39 +0300] - EP-009 / US-070
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement Ctrl+Z and Backspace rollback for tag auto-conversion
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/App.tsx` so the note editor exposes a rollback handle for the latest auto-converted hashtag, clears that rollback state when later editor edits supersede it, and restores the original token through one Tiptap undo step.
+  - Updated the note screen tag area to track whether the latest auto-conversion actually added a tag, remove that tag only when appropriate during rollback, and wire both Ctrl+Z and empty-input Backspace on the tag field to the shared rollback path.
+  - Expanded `backend/tests/test_note_editor_tag_autoconversion.py` source guards to lock in the rollback handle, latest-conversion tracking, and tag-input keyboard shortcuts.
+- Files changed
+  - `backend/tests/test_note_editor_tag_autoconversion.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (136 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-070` as passed and added a durable note about latest-conversion-only rollback, Tiptap undo restoration, and the shared Ctrl+Z/Backspace rollback path.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep hashtag rollback tied to the latest auto-conversion only, and drive editor restoration through one `undo()` path so the token restore stays aligned with the original single-transaction conversion behavior.
+  - Gotchas encountered
+    - Rollback should remove the converted tag only if that conversion actually introduced it; if the tag already existed on the note, restoring the text must not strip the pre-existing tag chip.
+  - Useful context
+    - `NoteEditor` now owns the editor-side rollback eligibility and undo call, while `NoteScreen` owns tag-list rollback state plus the tag-input Ctrl+Z and Backspace keyboard handling.
+---
+
 ## [2026-03-15 17:01:05 +0300] - EP-009 / US-069
 Epic: Note editor, Tiptap behavior, image nodes, and note actions
 Epic Branch: ralph/sematrix-mvp/ep-009-note-editor

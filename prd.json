@@ -1111,8 +1111,8 @@
             "Rollback behavior is limited to the latest auto-conversion flow described in the spec"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires both undo paths and ties them to the one-transaction Tiptap implementation."
+          "passes": true,
+          "notes": "The spec explicitly requires both undo paths and ties them to the one-transaction Tiptap implementation. The note screen now tracks only the latest auto-conversion as rollbackable, uses a `NoteEditor` imperative undo handle to restore the original editor token via one Tiptap undo step, removes the newly created tag only when that conversion actually added it, and wires both Ctrl+Z plus empty-input Backspace on the tag field to the same rollback path."
         },
         {
           "id": "US-071",
