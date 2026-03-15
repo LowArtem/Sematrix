@@ -177,6 +177,7 @@ Do not move business logic into route handlers or UI code.
 - Keep note-editor tag editing and later `#tag` auto-conversion on one shared frontend normalization helper that mirrors the backend lowercase/no-spaces/allowed-characters rules for UX, while the backend remains the final source of truth.
 - Keep note-editor `#tag` auto-conversion in one Tiptap keydown path that triggers only in normal text, removes the finished token in a single editor transaction, and then hands normalized tag/focus updates back to the screen state so later rollback logic can build on one shared conversion flow.
 - Keep note-editor Save/Reindex/Delete mutations behind shared frontend API helpers, and refresh note detail through normal REST reads after accepted mutations so the screen reflects persisted backend status without inventing client-side processing logic or realtime transport.
+- Keep note-detail warning rendering driven by the backend `NoteDetailDto`: normalize `processing_warnings` once in the screen, surface `stage`/`target`/`code`/`retryable` metadata there, and do not invent client-side warning classification beyond presentation fallbacks.
 - MVP status updates are **REST-based only**. Do not add SSE/WebSocket status streaming unless explicitly requested.
 
 ---

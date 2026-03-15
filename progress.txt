@@ -53,13 +53,12 @@
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
-<<<<<<< HEAD
 - Keep note-screen Save/Reindex/Delete calls in shared `frontend/src/api.ts` helpers and refresh note detail with normal REST reads after accepted mutations so the editor reflects persisted backend state without inventing SSE/WebSocket status logic.
-=======
 - Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
 - Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
 - Keep note lexical search in `app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery` expression for both `@@` matching and `ts_rank_cd` ranking.
 - Keep hybrid-search RRF fusion in a shared domain helper, reuse one `RRF_TOPN` value for both lexical and vector candidate preselect queries after filters, and paginate only after the fused `score desc, updated_at desc, id desc` ordering is built.
+- Keep note-detail warning rendering driven by a typed frontend warning contract, and normalize missing `stage`/`target`/`code` fields in one helper so the UI can show backend warning metadata without inventing new client-side pipeline semantics.
 
 ## [2026-03-15 11:48:59 +0300] - EP-007 / US-054
 Epic: Hybrid search, search-document construction, and scoring
@@ -247,7 +246,6 @@ Thread: CLI run
   - Useful context
     - `sematrix.finalize_pipeline` now treats invalid embedding length as a critical finalization failure for both chord-backed and direct-finalize runs, while the later search-query embedding story can reuse the same 1024-dimension helper.
 ---
->>>>>>> ralph/sematrix-mvp-base
 
 ## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
 Epic: Image OCR/caption and secure link processing
@@ -2385,6 +2383,39 @@ Thread: CLI run
     - Keep inline note-image rendering inside the centralized Tiptap image extension so both fresh uploads and reloaded notes resolve `/api/assets/{assetId}` from `assetId` consistently.
   - Gotchas encountered
     - Persisted note content may legitimately omit `src` because `assetId` is the real source of truth, so relying on stored `src` alone can make previously uploaded images disappear after reload.
+- Useful context
+  - `frontend/src/App.tsx` now treats `assetId` as enough information to render inline images in the editor, while the remaining EP-009 work is limited to surfacing warning/error detail more richly on the note screen.
+---
+
+## [2026-03-15 18:06:02 +0300] - EP-009 / US-072
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Display current status, processing error, and warning details on the note screen
+Thread: CLI run
+- What was implemented
+  - Added a dedicated processing-status panel to `frontend/src/App.tsx` with status-specific copy derived from `NoteDetailDto`, so the editor now explains Draft, Processing, Ready, and Error states without adding any client-side pipeline logic.
+  - Introduced a typed frontend `ProcessingWarning` contract in `frontend/src/api.ts`, normalized warning payloads in one helper, and expanded the warning list UI to show `stage`, `target`, `code`, and `retryable` metadata with a fallback message when only note-level warning counts are available.
+  - Highlighted `processing_error` more clearly, refreshed `frontend/src/styles.css` for the new status/warning presentation, and added source-guard coverage in `backend/tests/test_note_detail_screen.py` to lock in the new status and warning rendering flow.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (159 passed)
+- PRD updates made
+  - Marked `US-072` as passed and added a durable note about typed warning rendering, normalized frontend fallbacks, and distinct `processing_error` presentation.
+  - Re-evaluated `EP-009`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-detail warning rendering behind one frontend normalization helper so backend warning metadata can stay presentation-ready even when some optional fields are absent from the payload.
+  - Gotchas encountered
+    - `has_warnings=true` does not guarantee a fully populated `processing_warnings` array, so the note screen still needs a graceful fallback summary instead of assuming detailed entries always exist.
   - Useful context
-    - `frontend/src/App.tsx` now treats `assetId` as enough information to render inline images in the editor, while the remaining EP-009 work is limited to surfacing warning/error detail more richly on the note screen.
+    - `frontend/src/App.tsx` now treats `NoteDetailDto` as the only source of truth for note status, warning details, and `processing_error`, while the editor interactions remain wired through the existing shared REST helpers.
 ---

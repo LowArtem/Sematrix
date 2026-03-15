@@ -22,8 +22,16 @@ export type NoteDetail = {
   processing_error: string | null
   has_warnings: boolean
   warnings_count: number
-  processing_warnings: Array<Record<string, unknown>>
+  processing_warnings: ProcessingWarning[]
   index_version: number
+}
+
+export type ProcessingWarning = {
+  stage?: string
+  target?: string
+  code?: string
+  message?: string
+  retryable?: boolean
 }
 
 export type Folder = {

@@ -55,6 +55,24 @@ def test_note_detail_screen_renders_note_fields_and_action_layout() -> None:
     assert 'onContentChange={setDraftContentJson}' in app_source
 
 
+def test_note_detail_screen_surfaces_status_and_warning_details_from_note_detail() -> None:
+    app_source = (FRONTEND_SRC / "App.tsx").read_text(encoding="utf-8")
+    api_source = (FRONTEND_SRC / "api.ts").read_text(encoding="utf-8")
+    styles_source = (FRONTEND_SRC / "styles.css").read_text(encoding="utf-8")
+
+    assert "export type ProcessingWarning = {" in api_source
+    assert "processing_warnings: ProcessingWarning[]" in api_source
+    assert "function describeNoteStatus(note: NoteDetail): string {" in app_source
+    assert "function normalizeProcessingWarning(warning: ProcessingWarning): Required<ProcessingWarning> {" in app_source
+    assert '<span className="field-label">Processing Status</span>' in app_source
+    assert 'const warningDetails = note.processing_warnings.map(normalizeProcessingWarning)' in app_source
+    assert 'Warnings were recorded for this note, but detailed entries are not available in the current payload.' in app_source
+    assert 'className={`warning-meta-chip ${warning.retryable ? "is-retryable" : "is-final"}`}' in app_source
+    assert 'className={`summary-copy ${note.processing_error ? "processing-error-copy" : ""}`}' in app_source
+    assert ".status-detail-panel" in styles_source
+    assert ".warning-meta-chip.is-retryable" in styles_source
+
+
 def test_note_detail_screen_surfaces_backend_error_message_for_unknown_note() -> None:
     app_source = (FRONTEND_SRC / "App.tsx").read_text(encoding="utf-8")
     api_source = (FRONTEND_SRC / "api.ts").read_text(encoding="utf-8")

@@ -16,6 +16,7 @@ import {
   type Asset,
   type Folder,
   type NoteDetail,
+  type ProcessingWarning,
 } from "./api"
 import { normalizeTagName, normalizeTagNames } from "./tags"
 
@@ -94,6 +95,31 @@ function statusTone(status: string): string {
 
 function isAsyncAccepted(response: NoteDetail | AsyncAccepted): response is AsyncAccepted {
   return "message" in response
+}
+
+function describeNoteStatus(note: NoteDetail): string {
+  switch (note.status) {
+    case "Processing":
+      return "Background indexing is running. Refresh the page later to see the persisted result."
+    case "Ready":
+      return note.has_warnings
+        ? "Indexing finished with warnings. Review the details below to see what was skipped or downgraded."
+        : "Indexing finished successfully and the note is ready for search."
+    case "Error":
+      return "The latest indexing run failed. Review the processing error details before trying again."
+    default:
+      return "This note is still a Draft and has not started background processing yet."
+  }
+}
+
+function normalizeProcessingWarning(warning: ProcessingWarning): Required<ProcessingWarning> {
+  return {
+    stage: warning.stage || "warning",
+    target: warning.target || "note",
+    code: warning.code || "unknown_warning",
+    message: warning.message || warning.code || "Unknown warning",
+    retryable: Boolean(warning.retryable),
+  }
 }
 
 async function loadNoteScreenData(noteId: string, signal?: AbortSignal): Promise<{ note: NoteDetail; folders: Folder[] }> {
@@ -608,6 +634,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
   const editorContentJson = draftContentJson ?? note.content_json
   const displayedTags = draftTags ?? normalizeTagNames(note.tags.map((tag) => tag.name))
   const serializedContentJson = JSON.stringify(editorContentJson, null, 2)
+  const warningDetails = note.processing_warnings.map(normalizeProcessingWarning)
 
   function clearPendingAutoConvertRollback(): void {
     setPendingAutoConvertRollback(null)
@@ -943,6 +970,25 @@ function NoteScreen({ noteId }: { noteId: string }) {
         <aside className="library-card sidebar-card">
           <section className="sidebar-section">
             <div className="section-heading">
+              <span className="field-label">Processing Status</span>
+            </div>
+            <div className={`status-detail-panel ${statusTone(note.status)}`}>
+              <p className="status-detail-copy">{describeNoteStatus(note)}</p>
+              <dl className="status-detail-grid">
+                <div>
+                  <dt>Status</dt>
+                  <dd>{note.status}</dd>
+                </div>
+                <div>
+                  <dt>Warnings</dt>
+                  <dd>{note.has_warnings ? `${note.warnings_count} present` : "None"}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          <section className="sidebar-section">
+            <div className="section-heading">
               <span className="field-label">Summary</span>
             </div>
             <p className="summary-copy">{note.summary || "No summary generated yet."}</p>
@@ -952,15 +998,24 @@ function NoteScreen({ noteId }: { noteId: string }) {
             <div className="section-heading">
               <span className="field-label">Warnings</span>
             </div>
-            {note.processing_warnings.length ? (
+            {warningDetails.length ? (
               <ul className="warning-list">
-                {note.processing_warnings.map((warning, index) => (
-                  <li key={`${String(warning.target)}-${index}`}>
-                    <strong>{String(warning.stage || "warning")}</strong>
-                    <span>{String(warning.message || warning.code || "Unknown warning")}</span>
+                {warningDetails.map((warning, index) => (
+                  <li key={`${warning.target}-${warning.code}-${index}`}>
+                    <div className="warning-row">
+                      <strong>{warning.stage}</strong>
+                      <span className="warning-meta-chip">{warning.target}</span>
+                      <span className="warning-meta-chip">{warning.code}</span>
+                      <span className={`warning-meta-chip ${warning.retryable ? "is-retryable" : "is-final"}`}>
+                        {warning.retryable ? "Retryable" : "Final"}
+                      </span>
+                    </div>
+                    <span>{warning.message}</span>
                   </li>
                 ))}
               </ul>
+            ) : note.has_warnings ? (
+              <p className="summary-copy">Warnings were recorded for this note, but detailed entries are not available in the current payload.</p>
             ) : (
               <p className="summary-copy">No processing warnings.</p>
             )}
@@ -970,7 +1025,9 @@ function NoteScreen({ noteId }: { noteId: string }) {
             <div className="section-heading">
               <span className="field-label">Processing Error</span>
             </div>
-            <p className="summary-copy">{note.processing_error || "No processing error."}</p>
+            <p className={`summary-copy ${note.processing_error ? "processing-error-copy" : ""}`}>
+              {note.processing_error || "No processing error."}
+            </p>
           </section>
         </aside>
       </section>
