@@ -190,28 +190,79 @@ dd {
   color: rgba(22, 48, 57, 0.7);
 }
 
-.note-list {
+.results-subtitle {
+  margin: 0.55rem 0 0;
+  max-width: 27rem;
+  color: rgba(22, 48, 57, 0.72);
+}
+
+.results-subtitle code,
+.pagination-copy {
+  font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+}
+
+.note-grid {
   display: grid;
-  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
   margin: 1.25rem 0 0;
   padding: 0;
   list-style: none;
 }
 
-.note-list-item {
-  padding: 1rem 1.05rem;
+.note-card {
+  display: grid;
+  align-content: start;
+  gap: 0.9rem;
+  min-height: 15.5rem;
+  padding: 1.1rem;
   border: 1px solid rgba(22, 48, 57, 0.08);
   border-radius: 1.15rem;
-  background: rgba(255, 255, 255, 0.68);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 251, 249, 0.84)),
+    rgba(255, 255, 255, 0.68);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.note-list-item h3 {
+.note-card h3 {
   font-size: 1.2rem;
 }
 
+.note-kicker {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(154, 95, 26, 0.88);
+}
+
 .note-summary {
-  margin: 0.65rem 0;
+  margin: 0;
   color: rgba(22, 48, 57, 0.78);
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-chip {
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(154, 95, 26, 0.12);
+  color: #744103;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.muted-tag {
+  background: rgba(22, 48, 57, 0.08);
+  color: rgba(22, 48, 57, 0.62);
 }
 
 .status-pill {
@@ -225,6 +276,42 @@ dd {
 
 .error-state {
   color: #9b2c2c;
+}
+
+.pagination-bar,
+.pagination-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pagination-bar {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(22, 48, 57, 0.08);
+}
+
+.pagination-copy {
+  margin: 0.35rem 0 0;
+  color: rgba(22, 48, 57, 0.72);
+}
+
+.pagination-button {
+  min-width: 6.5rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(22, 48, 57, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pagination-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 @media (max-width: 640px) {
@@ -245,7 +332,9 @@ dd {
   .search-row,
   .results-header,
   .note-item-header,
-  .note-meta-row {
+  .note-meta-row,
+  .pagination-bar,
+  .pagination-actions {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -253,5 +342,9 @@ dd {
   .search-button {
     width: 100%;
     min-height: 3rem;
+  }
+
+  .pagination-button {
+    width: 100%;
   }
 }

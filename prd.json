@@ -959,8 +959,8 @@
             "The frontend uses the backend total field to support pagination controls"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The backend owns ranking and filtering. The frontend only renders paginated results."
+          "passes": true,
+          "notes": "The backend owns ranking and filtering. The frontend only renders paginated results. `frontend/src/App.tsx` now renders backend-loaded `NoteCardDto` items in a responsive card grid with title, summary fallback, tags, updated time, and status, and drives Previous/Next pagination strictly through the API `limit`/`offset` contract plus the backend `total` field."
         },
         {
           "id": "US-061",
@@ -1004,7 +1004,7 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "This epic covers the user-facing application shell and browsing workflow. Search logic remains backend-driven; the frontend only sends input and renders results."
+      "notes": "This epic covers the user-facing application shell and browsing workflow. Search logic remains backend-driven; the frontend only sends input and renders results. `US-057` and `US-060` are complete, but the epic stays open until the branding shell, sidebar, plus-card creation, status indicators, and reload behavior stories are finished."
     },
     {
       "id": "EP-009",

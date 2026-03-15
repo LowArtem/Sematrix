@@ -21,10 +21,25 @@ function formatUpdatedAt(value: string): string {
   return parsed.toLocaleString()
 }
 
+function buildCardSummary(note: NoteCard): string {
+  const trimmedSummary = note.summary.trim()
+
+  if (trimmedSummary) {
+    return trimmedSummary
+  }
+
+  if (note.tags.length > 0) {
+    return `Tagged with ${note.tags.map((tag) => `#${tag.name}`).join(", ")}.`
+  }
+
+  return "Open this note to add a summary-worthy detail."
+}
+
 export default function App() {
   const [queryInput, setQueryInput] = useState("")
   const [submittedQuery, setSubmittedQuery] = useState("")
   const [selectedFolderId] = useState<string | null>(null)
+  const [paginationOffset, setPaginationOffset] = useState(0)
   const [noteList, setNoteList] = useState<PaginatedResponse<NoteCard>>(emptyNoteList)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -35,10 +50,15 @@ export default function App() {
         q: submittedQuery,
         folderId: selectedFolderId,
         limit: PAGE_LIMIT,
-        offset: 0,
+        offset: paginationOffset,
       }),
-    [selectedFolderId, submittedQuery],
+    [paginationOffset, selectedFolderId, submittedQuery],
   )
+
+  const currentPage = Math.floor(noteList.offset / noteList.limit) + 1
+  const totalPages = noteList.total === 0 ? 1 : Math.ceil(noteList.total / noteList.limit)
+  const hasPreviousPage = noteList.offset > 0
+  const hasNextPage = noteList.offset + noteList.limit < noteList.total
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -51,7 +71,7 @@ export default function App() {
         q: submittedQuery,
         folderId: selectedFolderId,
         limit: PAGE_LIMIT,
-        offset: 0,
+        offset: paginationOffset,
       },
       abortController.signal,
     )
@@ -75,11 +95,12 @@ export default function App() {
     return () => {
       abortController.abort()
     }
-  }, [selectedFolderId, submittedQuery])
+  }, [paginationOffset, selectedFolderId, submittedQuery])
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
     setSubmittedQuery(queryInput)
+    setPaginationOffset(0)
   }
 
   return (
@@ -134,7 +155,7 @@ export default function App() {
             </div>
             <div>
               <dt>offset</dt>
-              <dd>{String(noteList.offset)}</dd>
+              <dd>{String(paginationOffset)}</dd>
             </div>
           </dl>
           <p className="request-path">{requestPath}</p>
@@ -145,6 +166,10 @@ export default function App() {
             <div>
               <p className="section-label">Backend results</p>
               <h2>Notes</h2>
+              <p className="results-subtitle">
+                The card grid stays backend-ranked and pages through the API's
+                <code> limit</code>/<code>offset</code> contract.
+              </p>
             </div>
             <p className="result-count">{noteList.total} total</p>
           </div>
@@ -157,21 +182,62 @@ export default function App() {
           ) : null}
 
           {!isLoading && !errorMessage && noteList.items.length > 0 ? (
-            <ul className="note-list">
+            <>
+              <ul className="note-grid">
               {noteList.items.map((note) => (
-                <li className="note-list-item" key={note.id}>
+                <li className="note-card" key={note.id}>
                   <div className="note-item-header">
-                    <h3>{note.title || "Untitled note"}</h3>
+                    <p className="note-kicker">Note</p>
                     <span className="status-pill">{note.status}</span>
                   </div>
-                  <p className="note-summary">{note.summary || "No summary yet."}</p>
+                  <h3>{note.title || "Untitled note"}</h3>
+                  <p className="note-summary">{buildCardSummary(note)}</p>
+                  <ul className="tag-list" aria-label="Note tags">
+                    {note.tags.length > 0 ? (
+                      note.tags.map((tag) => (
+                        <li className="tag-chip" key={tag.id}>
+                          #{tag.name}
+                        </li>
+                      ))
+                    ) : (
+                      <li className="tag-chip muted-tag">No tags yet</li>
+                    )}
+                  </ul>
                   <div className="note-meta-row">
                     <span>{formatUpdatedAt(note.updated_at)}</span>
-                    <span>{note.tags.length} tags</span>
+                    <span>{note.folder_id ? "Filed note" : "Unfiled"}</span>
                   </div>
                 </li>
               ))}
-            </ul>
+              </ul>
+
+              <div className="pagination-bar">
+                <div>
+                  <p className="section-label">Pagination</p>
+                  <p className="pagination-copy">
+                    Page {currentPage} of {totalPages}
+                  </p>
+                </div>
+                <div className="pagination-actions">
+                  <button
+                    className="pagination-button"
+                    type="button"
+                    onClick={() => setPaginationOffset(Math.max(0, noteList.offset - noteList.limit))}
+                    disabled={!hasPreviousPage}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="pagination-button"
+                    type="button"
+                    onClick={() => setPaginationOffset(noteList.offset + noteList.limit)}
+                    disabled={!hasNextPage}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
           ) : null}
         </section>
       </section>
