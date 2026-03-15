@@ -46,6 +46,42 @@
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
 - Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
+- Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
+
+## [2026-03-15 11:33:21 +0300] - EP-007 / US-051
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement embedding generation and dimensionality validation for search_text
+Thread: CLI run
+- What was implemented
+  - Added `NOTE_EMBEDDING_DIMENSION` plus `validate_note_embedding(...)` in `backend/app/domain/pipeline.py` so the fixed `VECTOR(1024)` rule lives in one shared place for note-index embedding writes.
+  - Updated `backend/app/infra/pipeline.py` so finalization still embeds `search_text` through the local Ollama client but now validates the embedding via the shared helper before persisting `notes.embedding`.
+  - Updated `backend/app/workers/tasks.py` so `sematrix.finalize_pipeline` rolls back and routes any embedding/finalization exception through `pipeline_failed(...)`, which keeps direct-finalize runs from getting stuck in `Processing` when embedding validation fails.
+  - Expanded `backend/tests/test_pipeline_finalization.py` with source guards for the shared dimension helper and the finalize-task failure-routing path.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/pipeline.py`
+  - `backend/app/infra/pipeline.py`
+  - `backend/app/workers/tasks.py`
+  - `backend/tests/test_pipeline_finalization.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_pipeline_finalization.py backend/tests/test_pipeline_failure_handling.py backend/tests/test_note_reindex_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (125 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-051` as passed and added a durable note about shared embedding-dimension validation plus finalize-task failure routing for direct-finalize runs.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the RU+EN FTS, vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Route direct finalizer failures back through the shared pipeline failure handler so embedding or summary write errors still land in `Error` even when no stage chord errback is present.
+  - Gotchas encountered
+    - Validating embedding length only inside the finalizer is not enough by itself; zero-stage runs also need the worker task to catch and classify finalizer exceptions or text-only notes can stay stuck in `Processing`.
+  - Useful context
+    - `sematrix.finalize_pipeline` now treats invalid embedding length as a critical finalization failure for both chord-backed and direct-finalize runs, while the later search-query embedding story can reuse the same 1024-dimension helper.
+---
 
 ## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
 Epic: Image OCR/caption and secure link processing

@@ -8,6 +8,7 @@ from uuid import UUID
 PROCESS_LINKS_TASK = "sematrix.process_links"
 PROCESS_OCR_TASK = "sematrix.process_ocr"
 PROCESS_IMAGE_CAPTION_TASK = "sematrix.process_image_caption"
+NOTE_EMBEDDING_DIMENSION = 1024
 TASK_STAGE_NAME_MAP = {
     PROCESS_LINKS_TASK: "process_links",
     PROCESS_OCR_TASK: "process_ocr",
@@ -88,6 +89,13 @@ def build_search_text(
             parts.append(normalized_text)
 
     return "\n\n".join(parts)
+
+
+def validate_note_embedding(embedding: list[float]) -> None:
+    if len(embedding) != NOTE_EMBEDDING_DIMENSION:
+        raise ValueError(
+            f"Embedding dimensionality must be exactly {NOTE_EMBEDDING_DIMENSION}"
+        )
 
 
 def normalize_pipeline_stage_name(stage_name: str | None) -> str | None:

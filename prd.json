@@ -820,8 +820,8 @@
             "Embeddings are rebuilt on finalization and on reindex"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes the embedding model to bge-m3 and the database dimension to VECTOR(1024)."
+          "passes": true,
+          "notes": "The spec fixes the embedding model to bge-m3 and the database dimension to VECTOR(1024). Finalization now validates embeddings through a shared dimension helper before writing `notes.embedding`, and the `sematrix.finalize_pipeline` worker routes any embedding/finalization exception back through `pipeline_failed(...)` so direct-finalize runs still mark the note `Error` instead of leaving it stuck in `Processing`."
         },
         {
           "id": "US-052",
@@ -882,7 +882,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes."
+      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes. Query parsing, shared search-document construction, and note embedding generation/validation are now in place, but the RU+EN runtime FTS query path, vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` behavior are still open."
     },
     {
       "id": "EP-008",
