@@ -112,3 +112,13 @@ def test_note_query_parser_treats_punctuation_only_remainder_as_tag_only_search(
 
     assert getattr(parsed_query, "text_query") == ""
     assert getattr(parsed_query, "tag_names") == ["focus", "ready"]
+
+
+def test_note_query_parser_normalizes_multiline_whitespace_after_tag_removal() -> None:
+    namespace = _load_query_parser_namespace()
+    parse_note_query = cast(Callable[[str], object], namespace["parse_note_query"])
+
+    parsed_query = parse_note_query("#Focus\nship roadmap\twith #Ready")
+
+    assert getattr(parsed_query, "text_query") == "ship roadmap with"
+    assert getattr(parsed_query, "tag_names") == ["focus", "ready"]
