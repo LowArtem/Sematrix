@@ -18,7 +18,7 @@ def _load_query_parser_namespace() -> dict[str, object]:
     for node in module.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name)
-            and target.id in {"TAG_NAME_INNER_PATTERN", "HASHTAG_PATTERN"}
+            and target.id in {"TAG_NAME_INNER_PATTERN", "HASHTAG_PATTERN", "TEXT_QUERY_CONTENT_PATTERN"}
             for target in node.targets
         ):
             target_nodes.append(node)
@@ -62,6 +62,7 @@ def test_note_query_parser_reuses_tag_name_rules() -> None:
     assert "from app.domain.tags import TAG_NAME_PATTERN, normalize_tag_names" in source
     assert 'TAG_NAME_INNER_PATTERN = TAG_NAME_PATTERN.pattern.removeprefix("^").removesuffix("$")' in source
     assert 'HASHTAG_PATTERN = re.compile(rf"(?<!\\w)#({TAG_NAME_INNER_PATTERN})(?=$|[\\s.,!?;:)\\]])")' in source
+    assert 'TEXT_QUERY_CONTENT_PATTERN = re.compile(r"[0-9A-Za-zА-Яа-яЁё]")' in source
 
 
 def test_note_query_parser_keeps_tag_only_search_as_empty_text_query() -> None:
@@ -69,6 +70,7 @@ def test_note_query_parser_keeps_tag_only_search_as_empty_text_query() -> None:
 
     assert 'text_query = HASHTAG_PATTERN.sub(" ", raw_query)' in source
     assert 'normalized_text_query = " ".join(text_query.split())' in source
+    assert 'if normalized_text_query and not TEXT_QUERY_CONTENT_PATTERN.search(normalized_text_query):' in source
     assert "return ParsedNoteQuery(text_query=\"\", tag_names=[])" in source
 
 
@@ -99,4 +101,14 @@ def test_note_query_parser_accepts_trailing_punctuation_after_valid_tag() -> Non
     parsed_query = parse_note_query("review #Focus, then ship #ready!")
 
     assert getattr(parsed_query, "text_query") == "review , then ship !"
+    assert getattr(parsed_query, "tag_names") == ["focus", "ready"]
+
+
+def test_note_query_parser_treats_punctuation_only_remainder_as_tag_only_search() -> None:
+    namespace = _load_query_parser_namespace()
+    parse_note_query = cast(Callable[[str], object], namespace["parse_note_query"])
+
+    parsed_query = parse_note_query(" #Focus, #ready! ")
+
+    assert getattr(parsed_query, "text_query") == ""
     assert getattr(parsed_query, "tag_names") == ["focus", "ready"]

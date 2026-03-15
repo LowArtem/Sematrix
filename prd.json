@@ -793,7 +793,7 @@
           ],
           "priority": 1,
           "passes": true,
-          "notes": "The frontend search field is intentionally simple; all parsing and semantics are handled on the backend. `app.domain.notes.parse_note_query(...)` now derives its hashtag regex from the shared tag-name validator so GET /api/notes extracts valid `#tag` filters with the same lowercase/underscore/Cyrillic-Latin rules used by tag persistence, preserves empty-text tag-only searches, and avoids partial matches for invalid hashtag-like text such as `#bad-tag` while still accepting trailing punctuation after valid tags."
+          "notes": "The frontend search field is intentionally simple; all parsing and semantics are handled on the backend. `app.domain.notes.parse_note_query(...)` now derives its hashtag regex from the shared tag-name validator so GET /api/notes extracts valid `#tag` filters with the same lowercase/underscore/Cyrillic-Latin rules used by tag persistence, preserves empty-text tag-only searches including punctuation-only leftovers after hashtag removal, and avoids partial matches for invalid hashtag-like text such as `#bad-tag` while still accepting trailing punctuation after valid tags."
         },
         {
           "id": "US-050",

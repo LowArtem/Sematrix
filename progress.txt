@@ -23,6 +23,7 @@
 - Keep request-scoped SQLAlchemy sessions in `app/api/dependencies.py` and inject repository-backed domain services from there so FastAPI route handlers stay HTTP-only.
 - Keep tag validation and normalization centralized in `app/domain/tags.py` so request DTOs and later save/domain flows reuse the same lowercase/no-spaces/allowed-characters rules.
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
+- Treat punctuation-only leftovers after stripping valid `#tags` from `q` as an empty text query, so tag-only note searches stay on the stable listing path instead of accidentally triggering hybrid text search.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
 - Keep the Draft-versus-Processing decision in a shared domain helper so save flows and later Draft-cleanup logic can reuse the exact meaningful-content rule.
 - Keep Draft reset defaults in a shared domain helper so empty saves clear `summary`, `search_text`, `embedding`, and warning/error fields consistently whenever a note falls back to `Draft`.
@@ -84,6 +85,35 @@ Thread: CLI run
     - Existing source-guard tests in this repo may assert exact dependency wiring strings, so backend dependency cleanup must preserve or deliberately update those expectations when adding new injected clients.
   - Useful context
     - `NoteService.list_notes(...)` now keeps empty-text queries on the plain listing path, while non-empty free-text queries go through query embedding, pgvector candidate retrieval, RRF fusion, and final note hydration through the same public `GET /api/notes` route.
+---
+
+## [2026-03-15 12:56:27 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Tightened `app.domain.notes.parse_note_query(...)` so punctuation-only leftovers after valid hashtag removal are normalized to an empty `text_query`, keeping true tag-only searches on the stable listing path instead of the hybrid-text path.
+  - Extended `backend/tests/test_note_query_parsing.py` with a regression case for inputs like `#Focus, #ready!`, while preserving the existing behavior that mixed text plus tagged punctuation still leaves the textual remainder intact.
+- Files changed
+  - `backend/app/domain/notes.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py` ✅
+  - `python -m pytest` ✅ (136 passed)
+  - `python -m compileall backend/app` ✅
+- PRD updates made
+  - Refined the existing `US-049` note to capture the punctuation-only tag-only query behavior now covered by the parser regression test.
+  - `EP-007` was already marked passed on this branch and remains passed.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Treat punctuation-only text left behind by hashtag stripping as empty search text, or tag-only queries like `#focus, #ready!` can accidentally route into hybrid search.
+  - Gotchas encountered
+    - Removing `#tag` tokens with regex substitution can leave commas/exclamation marks behind, so whitespace normalization alone is not enough to decide whether free-text search should run.
+  - Useful context
+    - The existing parser still preserves punctuation when real words remain, so mixed queries such as `review #focus, then ship #ready!` continue to feed the textual remainder to the hybrid-search path.
 ---
 
 ## [2026-03-15 12:02:04 +0300] - EP-007 / US-049

@@ -24,6 +24,7 @@ from app.infra.notes import (
 
 TAG_NAME_INNER_PATTERN = TAG_NAME_PATTERN.pattern.removeprefix("^").removesuffix("$")
 HASHTAG_PATTERN = re.compile(rf"(?<!\w)#({TAG_NAME_INNER_PATTERN})(?=$|[\s.,!?;:)\]])")
+TEXT_QUERY_CONTENT_PATTERN = re.compile(r"[0-9A-Za-zА-Яа-яЁё]")
 logger = get_logger(__name__)
 
 
@@ -459,6 +460,8 @@ def parse_note_query(q: str | None) -> ParsedNoteQuery:
     normalized_tag_names = normalize_tag_names(raw_tag_names) if raw_tag_names else []
     text_query = HASHTAG_PATTERN.sub(" ", raw_query)
     normalized_text_query = " ".join(text_query.split())
+    if normalized_text_query and not TEXT_QUERY_CONTENT_PATTERN.search(normalized_text_query):
+        normalized_text_query = ""
 
     return ParsedNoteQuery(
         text_query=normalized_text_query,
