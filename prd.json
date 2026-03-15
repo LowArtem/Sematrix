@@ -919,8 +919,8 @@
             "The frontend does not parse score or tags itself beyond basic display concerns"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The search field is intentionally free-form; parsing and ranking are backend responsibilities."
+          "passes": true,
+          "notes": "The search field is intentionally free-form; parsing and ranking are backend responsibilities. The frontend shell now sends the raw `q` value straight to `GET /api/notes` through a shared `frontend/src/api.ts` helper, keeps `folder_id` / `limit` / `offset` in the same request builder, and renders backend-loaded results without attempting client-side hashtag parsing or score logic."
         },
         {
           "id": "US-058",

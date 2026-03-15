@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Keep frontend note-list/search requests in a shared `frontend/src/api.ts` helper so the UI forwards raw `q` plus backend-owned `folder_id`/`limit`/`offset` params to `/api/notes` without client-side hashtag parsing.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -75,6 +76,39 @@ Thread: CLI run
     - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
   - Useful context
     - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 11:55:50 +0300] - EP-008 / US-057
+Epic: Frontend shell, main screen, sidebar, and card grid
+Epic Branch: ralph/sematrix-mvp/ep-008-frontend-shell-and-grid
+Story: Implement the top global search bar and request wiring to GET /api/notes
+Thread: CLI run
+- What was implemented
+  - Replaced the frontend placeholder landing page with a search-driven workspace shell that keeps a dedicated global search form at the top and explains that free text plus `#tags` are sent to the backend unchanged.
+  - Added `frontend/src/api.ts` so `/api/notes` requests are built in one place with raw `q`, `folder_id`, `limit`, and `offset`, then used that helper in `frontend/src/App.tsx` to load note results and surface API errors/loading state.
+  - Added `backend/tests/test_frontend_search_bar.py` source guards for the shared request builder and the no-client-side-parsing search form wiring.
+- Files changed
+  - `backend/tests/test_frontend_search_bar.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_frontend_search_bar.py` ✅
+  - `npm run build` ✅
+  - `docker compose build frontend` ✅
+  - `python -m pytest` ✅ (123 passed)
+- PRD updates made
+  - Marked `US-057` as passed and added a durable note about the shared `/api/notes` request helper plus raw `q` forwarding.
+  - Re-evaluated `EP-008`; it remains `passes: false` because the branding shell, sidebar, grid, plus-card, status indicators, and reload behavior stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep frontend `/api/notes` request construction in one helper so later folder selection, pagination, and search refinements reuse the same backend-owned query contract.
+  - Gotchas encountered
+    - Avoid client-side `#tag` parsing in the search bar; the backend already owns that behavior and the frontend should preserve the raw query string exactly.
+  - Useful context
+    - `frontend/src/App.tsx` now fetches note data on initial load and on explicit search submit, while `frontend/src/api.ts` exposes the shared request-path builder future sidebar and pagination stories can reuse.
 ---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046
