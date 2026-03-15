@@ -23,13 +23,16 @@ def test_pipeline_finalizer_reads_durable_results_and_builds_search_text() -> No
 
 
 def test_pipeline_finalizer_validates_embedding_and_marks_note_ready() -> None:
+    domain_source = (BACKEND_APP / "domain" / "pipeline.py").read_text(encoding="utf-8")
     pipeline_source = (BACKEND_APP / "infra" / "pipeline.py").read_text(encoding="utf-8")
     worker_source = (BACKEND_APP / "workers" / "tasks.py").read_text(encoding="utf-8")
     logging_source = (BACKEND_APP / "core" / "logging.py").read_text(encoding="utf-8")
 
+    assert 'NOTE_EMBEDDING_DIMENSION = 1024' in domain_source
+    assert 'def validate_note_embedding(embedding: list[float]) -> None:' in domain_source
     assert 'embedding = self._ollama_client.embed_text(text=search_text)' in pipeline_source
-    assert 'if len(embedding) != 1024:' in pipeline_source
-    assert 'raise ValueError("Embedding dimensionality must be exactly 1024")' in pipeline_source
+    assert 'validate_note_embedding(embedding)' in pipeline_source
+    assert 'Embedding dimensionality must be exactly {NOTE_EMBEDDING_DIMENSION}' in domain_source
     assert 'summary = self._ollama_client.generate_summary(search_text=search_text) if search_text else ""' in pipeline_source
     assert 'note.status = "Ready"' in pipeline_source
     assert 'note.processing_error = None' in pipeline_source
@@ -42,6 +45,16 @@ def test_pipeline_finalizer_validates_embedding_and_marks_note_ready() -> None:
     assert '"status"' in logging_source
     assert '"total_duration_ms"' in logging_source
     assert '"stage_durations_ms"' in logging_source
+
+
+def test_finalize_task_routes_embedding_failures_through_pipeline_failed_path() -> None:
+    worker_source = (BACKEND_APP / "workers" / "tasks.py").read_text(encoding="utf-8")
+
+    assert 'except Exception as exc:' in worker_source
+    assert 'session.rollback()' in worker_source
+    assert 'build_pipeline_failure_handler(session=session).handle_failure(' in worker_source
+    assert '"failed_task_name": self.name,' in worker_source
+    assert '"processing_error": str(exc),' in worker_source
 
 
 def test_pipeline_finalizer_uses_local_ollama_non_thinking_summary_and_embed_requests() -> None:

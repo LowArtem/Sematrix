@@ -20,11 +20,14 @@ def test_note_save_service_parses_content_and_dispatches_pipeline() -> None:
     domain_source = (BACKEND_APP / "domain" / "notes.py").read_text(encoding="utf-8")
     lifecycle_source = (BACKEND_APP / "domain" / "note_lifecycle.py").read_text(encoding="utf-8")
     parsing_source = (BACKEND_APP / "domain" / "note_content.py").read_text(encoding="utf-8")
+    pipeline_domain_source = (BACKEND_APP / "domain" / "pipeline.py").read_text(encoding="utf-8")
     dependency_source = (BACKEND_APP / "api" / "dependencies.py").read_text(encoding="utf-8")
     pipeline_source = (BACKEND_APP / "infra" / "pipeline.py").read_text(encoding="utf-8")
 
     assert 'parsed_content = parse_note_content(content_json)' in domain_source
     assert 'should_start_processing = has_meaningful_content(' in domain_source
+    assert 'search_text = build_search_text(' in domain_source
+    assert 'search_text=search_text,' in domain_source
     assert 'should_start_processing=should_start_processing' in domain_source
     assert '"event": "note_processing_started"' in domain_source
     assert 'pipeline_run = save_result.pipeline_run' in domain_source
@@ -34,6 +37,7 @@ def test_note_save_service_parses_content_and_dispatches_pipeline() -> None:
     assert 'def build_draft_reset_state() -> DraftResetState:' in lifecycle_source
     assert 'return bool(content_text_flat.strip() or asset_count > 0 or link_count > 0)' in lifecycle_source
     assert 'URL_PATTERN = re.compile(r"https?://[^\\s<>()]+", re.IGNORECASE)' in parsing_source
+    assert 'def build_search_text(' in pipeline_domain_source
     assert 'if node_type == "image" and isinstance(attrs.get("assetId"), str):' in parsing_source
     assert 'if not isinstance(mark, dict) or mark.get("type") != "link":' in parsing_source
     assert 'pipeline_dispatcher=CeleryPipelineDispatcher(),' in dependency_source
@@ -55,6 +59,7 @@ def test_note_save_repository_syncs_links_assets_and_processing_state() -> None:
     assert 'if should_start_processing:' in infra_source
     assert 'note.index_version += 1' in infra_source
     assert 'note.status = "Processing"' in infra_source
+    assert 'note.search_text = search_text' in infra_source
     assert 'pipeline_run = self._create_pipeline_run(' in infra_source
     assert 'snapshot_link_ids = sorted(' in infra_source
     assert 'snapshot_hash=compute_snapshot_hash(' in infra_source
