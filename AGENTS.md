@@ -122,6 +122,7 @@ Do not move business logic into route handlers or UI code.
 - Individual OCR/link/caption stages must not be launched ad hoc from API routes.
 - Only `finalize_pipeline(...)` or `pipeline_failed(...)` may set the final note state to `Ready` or `Error`.
 - `finalize_pipeline(...)` must read durable current-run stage outputs from PostgreSQL and rebuild `search_text`, `embedding`, and final `summary` from that stored state, not from large Celery callback payloads.
+- Save-time note updates should set the fast-phase `search_text` through the shared search-document builder using only currently available note fields, while finalization rebuilds the full `search_text` from durable OCR/link outputs without feeding `note.summary` back into the document.
 
 ### Worker granularity
 

@@ -45,6 +45,7 @@
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+- Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
 
 ## [2026-03-15 01:49:02 +0300] - EP-006 / US-048
 Epic: Image OCR/caption and secure link processing
@@ -104,8 +105,42 @@ Thread: CLI run
     - Derive search-query hashtag parsing from the same shared tag-name validator used by save-time normalization so search and persistence cannot silently drift.
   - Gotchas encountered
     - Import-heavy runtime tests for `app.domain.notes` are brittle in the host pytest environment here, so lightweight source guards are the safer way to lock in parser wiring without pulling SQLAlchemy-only backend dependencies into the test process.
+- Useful context
+  - `parse_note_query(...)` still returns the same `ParsedNoteQuery` contract, so later hybrid-search stories can consume parsed `text_query` and `tag_names` without changing the public `GET /api/notes` API.
+---
+
+## [2026-03-15 11:28:20 +0300] - EP-007 / US-050
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement search-document construction without summary feedback loops
+Thread: CLI run
+- What was implemented
+  - Reused `app.domain.pipeline.build_search_text(...)` as the shared search-document builder for both phases so meaningful saves now assemble and persist a fast-phase `search_text` from title, flattened content, and tags before background processing begins.
+  - Updated `backend/app/infra/notes.py` to store that fast-phase `search_text` when a note enters `Processing`, while `backend/app/infra/pipeline.py` continues rebuilding the full search document from durable OCR/caption/link outputs during finalization without ever feeding `note.summary` back into the document.
+  - Added `backend/tests/test_search_document.py`, refreshed `backend/tests/test_note_save_api.py`, and recorded the reusable fast-phase/full-phase `search_text` rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/domain/notes.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_save_api.py`
+  - `backend/tests/test_search_document.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_search_document.py backend/tests/test_note_save_api.py backend/tests/test_pipeline_finalization.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (124 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-050` as passed and added a durable note about the shared search-document builder, save-time fast-phase `search_text`, and finalization-time rebuild from durable enrichment outputs.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the embedding, RU+EN FTS, vector retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Build `search_text` through one shared helper in both phases so save-time indexing and finalization cannot drift while `note.summary` stays excluded from the search document.
+  - Gotchas encountered
+    - Persisting only the fast summary on save is not enough for the hybrid-search epic; `notes.search_text` also has to be written during the save transaction or the stored FTS document stays stale until finalization.
   - Useful context
-    - `parse_note_query(...)` still returns the same `ParsedNoteQuery` contract, so later hybrid-search stories can consume parsed `text_query` and `tag_names` without changing the public `GET /api/notes` API.
+    - `NoteService.save_note(...)` now passes a fast-phase `search_text` into the repository, while `sematrix.finalize_pipeline` still owns the enriched rebuild that adds OCR/caption/link-derived text for the same note version.
 ---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046

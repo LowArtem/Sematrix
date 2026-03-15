@@ -179,6 +179,7 @@ class NoteService:
             link_count=len(parsed_content.links),
         )
         effective_title = normalized_title
+        search_text = ""
         fast_summary = ""
         processing_warnings: list[dict[str, object]] = []
 
@@ -190,6 +191,13 @@ class NoteService:
                 tag_names=tags,
             )
             processing_warnings.extend(title_warnings)
+            search_text = build_search_text(
+                title=effective_title,
+                content_text_flat=parsed_content.content_text_flat,
+                tag_names=tags,
+                asset_texts=[],
+                link_texts=[],
+            )
             fast_summary, summary_warnings = self._build_fast_summary(
                 note_id=note_id,
                 title=effective_title,
@@ -208,6 +216,7 @@ class NoteService:
             asset_ids=parsed_content.asset_ids,
             links=parsed_content.links,
             should_start_processing=should_start_processing,
+            search_text=search_text,
             summary=fast_summary,
             processing_warnings=processing_warnings,
             request_id=request_id,

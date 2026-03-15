@@ -806,8 +806,8 @@
             "Final summary is generated from the completed search_text but does not trigger another search_text rebuild"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The specification explicitly forbids cyclic search_text -> summary -> search_text behavior."
+          "passes": true,
+          "notes": "The specification explicitly forbids cyclic search_text -> summary -> search_text behavior. `app.domain.pipeline.build_search_text(...)` now remains the shared search-document builder for both phases: save-time note updates persist a fast-phase `search_text` from title/content/tags only, while `sematrix.finalize_pipeline` rebuilds the full document from durable OCR/caption/link fields without feeding `note.summary` back into `search_text`."
         },
         {
           "id": "US-051",
