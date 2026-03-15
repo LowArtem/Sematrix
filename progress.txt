@@ -48,6 +48,42 @@
 - Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
 - Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
 - Keep note lexical search in `app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery` expression for both `@@` matching and `ts_rank_cd` ranking.
+- Keep hybrid-search RRF fusion in a shared domain helper, reuse one `RRF_TOPN` value for both lexical and vector candidate preselect queries after filters, and paginate only after the fused `score desc, updated_at desc, id desc` ordering is built.
+
+## [2026-03-15 11:48:59 +0300] - EP-007 / US-054
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement RRF score fusion, stable sorting, and final pagination
+Thread: CLI run
+- What was implemented
+  - Added `backend/app/domain/search.py` with a shared Reciprocal Rank Fusion helper that merges lexical/vector candidate ranks with `1 / (k + rank)`, then applies stable `score desc, updated_at desc, id desc` ordering before any pagination slice.
+  - Updated `backend/app/infra/notes.py` with pgvector-backed vector candidate retrieval on `notes.embedding` plus note-by-id hydration, and updated `backend/app/domain/notes.py` so `GET /api/notes` now runs hybrid search for non-empty free-text queries by embedding the query, fetching both candidate lists with the same `RRF_TOPN`, fusing them, and applying `limit/offset` only after final ranking.
+  - Added `backend/tests/test_note_hybrid_search.py` runtime and source coverage for RRF scoring, tie-breaking, post-fusion pagination, shared `RRF_TOPN` usage, and the non-ANN vector query path.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/api/dependencies.py`
+  - `backend/app/domain/notes.py`
+  - `backend/app/domain/search.py`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_hybrid_search.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app` ✅
+  - `python -m pytest` ✅ (132 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-053`, `US-054`, and `US-055` as passed and added durable notes about pgvector candidate retrieval, shared RRF fusion, and the final hybrid `GET /api/notes` flow.
+  - Re-evaluated `EP-007`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep hybrid-search RRF fusion separate from repository candidate retrieval so lexical/vector preselect queries can stay backend-driven while one shared helper owns score calculation, stable sorting, and post-fusion pagination.
+  - Gotchas encountered
+    - Existing source-guard tests in this repo may assert exact dependency wiring strings, so backend dependency cleanup must preserve or deliberately update those expectations when adding new injected clients.
+  - Useful context
+    - `NoteService.list_notes(...)` now keeps empty-text queries on the plain listing path, while non-empty free-text queries go through query embedding, pgvector candidate retrieval, RRF fusion, and final note hydration through the same public `GET /api/notes` route.
+---
 
 ## [2026-03-15 11:39:11 +0300] - EP-007 / US-052
 Epic: Hybrid search, search-document construction, and scoring

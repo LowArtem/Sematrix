@@ -56,6 +56,12 @@ class LexicalSearchCandidateRecord:
 
 
 @dataclass(frozen=True)
+class VectorSearchCandidateRecord:
+    note_id: UUID
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class SaveNoteRecord:
     note: NoteRecord
     pipeline_started: bool
@@ -131,6 +137,17 @@ class NoteRepository(Protocol):
         folder_id: UUID | None,
         limit: int,
     ) -> list[LexicalSearchCandidateRecord]: ...
+
+    def list_vector_search_candidates(
+        self,
+        *,
+        query_embedding: list[float],
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[VectorSearchCandidateRecord]: ...
+
+    def list_notes_by_ids(self, note_ids: list[UUID]) -> list[NoteRecord]: ...
 
 
 def build_note_search_tsquery(text_query: str):
@@ -392,6 +409,48 @@ class SqlAlchemyNoteRepository:
             )
             for row in rows
         ]
+
+    def list_vector_search_candidates(
+        self,
+        *,
+        query_embedding: list[float],
+        tag_names: list[str],
+        folder_id: UUID | None,
+        limit: int,
+    ) -> list[VectorSearchCandidateRecord]:
+        if not query_embedding:
+            return []
+
+        filtered_note_ids = self._build_filtered_note_ids_query(folder_id=folder_id, tag_names=tag_names).subquery()
+        vector_distance = Note.embedding.cosine_distance(query_embedding).label("vector_distance")
+        rows = self._session.execute(
+            select(Note.id, Note.updated_at, vector_distance)
+            .where(Note.id.in_(select(filtered_note_ids.c.id)))
+            .where(Note.embedding.is_not(None))
+            .order_by(vector_distance.asc(), Note.updated_at.desc(), Note.id.desc())
+            .limit(limit)
+        )
+
+        return [
+            VectorSearchCandidateRecord(
+                note_id=row.id,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_notes_by_ids(self, note_ids: list[UUID]) -> list[NoteRecord]:
+        if not note_ids:
+            return []
+
+        notes = list(
+            self._session.scalars(
+                select(Note)
+                .where(Note.id.in_(note_ids))
+                .options(selectinload(Note.tags))
+            )
+        )
+        return [self._to_record(note) for note in notes]
 
     def _get_note_with_relations(self, note_id: UUID) -> Note | None:
         return self._session.scalar(

@@ -847,8 +847,8 @@
             "No ANN index type such as HNSW or IVFFlat is introduced for MVP"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The specification explicitly says semantic search in MVP works without ANN indexes."
+          "passes": true,
+          "notes": "The specification explicitly says semantic search in MVP works without ANN indexes. `app.infra.notes` now embeds the free-text query once per hybrid search, queries filtered notes through pgvector `notes.embedding` with cosine-distance ordering and no ANN index types, and returns the top `RRF_TOPN` semantic candidates for later RRF fusion."
         },
         {
           "id": "US-054",
@@ -862,8 +862,8 @@
             "Pagination is applied only after candidate union, score calculation, and final sorting"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The specification explicitly rejects page-local normalization and requires RRF to stay stable across pages."
+          "passes": true,
+          "notes": "The specification explicitly rejects page-local normalization and requires RRF to stay stable across pages. `app.domain.search` now owns Reciprocal Rank Fusion with the fixed `1 / (k + rank)` formula, stable `score desc, updated_at desc, id desc` ordering, and post-fusion pagination after lexical/vector preselect lists are both fetched with the same `RRF_TOPN` value."
         },
         {
           "id": "US-055",
@@ -876,13 +876,13 @@
             "Results are returned as PaginatedResponse[NoteCardDto] with total, limit, and offset"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec fixes one endpoint for listing and search, not separate APIs for each mode."
+          "passes": true,
+          "notes": "The spec fixes one endpoint for listing and search, not separate APIs for each mode. `NoteService.list_notes(...)` now keeps tag-only or empty-text queries on the plain listing path, but switches non-empty free-text queries to the full hybrid backend flow: folder/tag filters before candidate retrieval, lexical plus vector preselects, RRF fusion, final `score` population, and `PaginatedResponse[NoteCardDto]` output through the same `GET /api/notes` contract."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes. Query parsing, shared search-document construction, note embedding generation/validation, and the shared RU+EN runtime FTS query path are now in place, but vector candidate retrieval, RRF fusion, and the final hybrid `GET /api/notes` behavior are still open."
+      "passes": true,
+      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes. Query parsing, shared search-document construction, note embedding generation/validation, the shared RU+EN runtime FTS query path, pgvector candidate retrieval without ANN indexes, shared RRF fusion, and the final hybrid `GET /api/notes` behavior are now all in place, so the epic acceptance criteria are satisfied."
     },
     {
       "id": "EP-008",

@@ -147,6 +147,7 @@ Do not move business logic into route handlers or UI code.
 - Lexical search must use stored/indexed PostgreSQL FTS data, not ad hoc `to_tsvector(...)` per request.
 - The FTS strategy is fixed to **RU + EN**, using explicit Russian and English configurations.
 - Keep note lexical search in `backend/app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q)` expression for both `@@` matching and `ts_rank_cd` ranking.
+- Keep hybrid-search RRF fusion in a backend domain helper, use the same `RRF_TOPN` preselect for both lexical and vector candidate lists after folder/tag filters, and apply `limit/offset` only after fused `score desc, updated_at desc, id desc` sorting.
 - Semantic search uses the note embedding stored in pgvector.
 - Hybrid ranking uses **RRF**, not page-local score normalization.
 - `search_text` is the canonical search document.
