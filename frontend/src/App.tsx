@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 
-import { buildNotesRequestPath, fetchNotes, NoteCard, PaginatedResponse } from "./api"
+import { buildNotesRequestPath, createNote, fetchNotes, NoteCard, PaginatedResponse } from "./api"
 
 const PAGE_LIMIT = 12
 
@@ -42,6 +42,7 @@ export default function App() {
   const [paginationOffset, setPaginationOffset] = useState(0)
   const [noteList, setNoteList] = useState<PaginatedResponse<NoteCard>>(emptyNoteList)
   const [isLoading, setIsLoading] = useState(true)
+  const [isCreatingNote, setIsCreatingNote] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const requestPath = useMemo(
@@ -101,6 +102,19 @@ export default function App() {
     event.preventDefault()
     setSubmittedQuery(queryInput)
     setPaginationOffset(0)
+  }
+
+  async function handleCreateNote(): Promise<void> {
+    setIsCreatingNote(true)
+    setErrorMessage(null)
+
+    try {
+      const note = await createNote()
+      window.location.assign(`/notes/${note.id}`)
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create note")
+      setIsCreatingNote(false)
+    }
   }
 
   return (
@@ -181,11 +195,32 @@ export default function App() {
             <p className="state-message">No notes match this query yet.</p>
           ) : null}
 
-          {!isLoading && !errorMessage && noteList.items.length > 0 ? (
+          {!errorMessage ? (
             <>
               <ul className="note-grid">
-              {noteList.items.map((note) => (
-                <li className="note-card" key={note.id}>
+                <li>
+                  <button
+                    className="note-card create-note-card"
+                    type="button"
+                    onClick={() => {
+                      void handleCreateNote()
+                    }}
+                    disabled={isCreatingNote}
+                  >
+                    <span className="create-note-plus" aria-hidden="true">
+                      +
+                    </span>
+                    <div className="create-note-copy">
+                      <p className="note-kicker">New note</p>
+                      <h3>{isCreatingNote ? "Creating draft..." : "Create a fresh draft"}</h3>
+                      <p className="note-summary">
+                        Start with a backend draft so the editor has a real note ID before uploads.
+                      </p>
+                    </div>
+                  </button>
+                </li>
+                {noteList.items.map((note) => (
+                  <li className="note-card" key={note.id}>
                   <div className="note-item-header">
                     <p className="note-kicker">Note</p>
                     <span className="status-pill">{note.status}</span>
@@ -207,36 +242,38 @@ export default function App() {
                     <span>{formatUpdatedAt(note.updated_at)}</span>
                     <span>{note.folder_id ? "Filed note" : "Unfiled"}</span>
                   </div>
-                </li>
-              ))}
+                  </li>
+                ))}
               </ul>
 
-              <div className="pagination-bar">
-                <div>
-                  <p className="section-label">Pagination</p>
-                  <p className="pagination-copy">
-                    Page {currentPage} of {totalPages}
-                  </p>
+              {noteList.items.length > 0 ? (
+                <div className="pagination-bar">
+                  <div>
+                    <p className="section-label">Pagination</p>
+                    <p className="pagination-copy">
+                      Page {currentPage} of {totalPages}
+                    </p>
+                  </div>
+                  <div className="pagination-actions">
+                    <button
+                      className="pagination-button"
+                      type="button"
+                      onClick={() => setPaginationOffset(Math.max(0, noteList.offset - noteList.limit))}
+                      disabled={!hasPreviousPage}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="pagination-button"
+                      type="button"
+                      onClick={() => setPaginationOffset(noteList.offset + noteList.limit)}
+                      disabled={!hasNextPage}
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
-                <div className="pagination-actions">
-                  <button
-                    className="pagination-button"
-                    type="button"
-                    onClick={() => setPaginationOffset(Math.max(0, noteList.offset - noteList.limit))}
-                    disabled={!hasPreviousPage}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="pagination-button"
-                    type="button"
-                    onClick={() => setPaginationOffset(noteList.offset + noteList.limit)}
-                    disabled={!hasNextPage}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
+              ) : null}
             </>
           ) : null}
         </section>

@@ -106,6 +106,7 @@ Do not move business logic into route handlers or UI code.
 - Asset usage must be tracked through `note_assets`.
 - Unused files should only be removed when they are no longer referenced anywhere.
 - Image upload must always be tied to a **real `note_id`**.
+- Frontend create-note flows must call `POST /api/notes` before entering editor/upload paths, so later image actions always start from a persisted Draft with a real note id.
 
 ---
 

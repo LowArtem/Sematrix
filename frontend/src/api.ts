@@ -16,6 +16,10 @@ export type NoteCard = {
   score: number | null
 }
 
+export type NoteDetail = {
+  id: string
+}
+
 export type PaginatedResponse<T> = {
   items: T[]
   total: number
@@ -77,4 +81,32 @@ export async function fetchNotes(
   }
 
   return (await response.json()) as PaginatedResponse<NoteCard>
+}
+
+export async function createNote(signal?: AbortSignal): Promise<NoteDetail> {
+  const response = await fetch("/api/notes", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+    },
+    signal,
+  })
+
+  if (!response.ok) {
+    let message = `Unable to create note (${response.status})`
+
+    try {
+      const error = (await response.json()) as ApiErrorDto
+
+      if (typeof error.message === "string" && error.message.trim()) {
+        message = error.message
+      }
+    } catch {
+      // Keep the fallback message when the API does not return JSON.
+    }
+
+    throw new Error(message)
+  }
+
+  return (await response.json()) as NoteDetail
 }

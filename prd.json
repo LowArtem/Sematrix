@@ -972,8 +972,8 @@
             "The user is redirected to the editor for the created note"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This behavior is required by the Draft asset-upload workflow because the editor needs a note_id before image uploads."
+          "passes": true,
+          "notes": "This behavior is required by the Draft asset-upload workflow because the editor needs a note_id before image uploads. The note grid now renders a distinct primary-style `+` card first, creates a Draft through a shared `POST /api/notes` helper, and redirects to `/notes/{id}` once the backend returns the new note id."
         },
         {
           "id": "US-062",
