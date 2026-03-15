@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 
 import { buildNotesRequestPath, createNote, fetchNotes, NoteCard, PaginatedResponse } from "./api"
+import brainLogo from "../../brain_logo.png"
 
 const PAGE_LIMIT = 12
 
@@ -129,7 +130,13 @@ export default function App() {
     <main className="workspace-shell">
       <section className="topbar-panel">
         <div className="topbar-copy">
-          <p className="eyebrow">Sematrix</p>
+          <div className="brand-mark" aria-label="Sematrix branding">
+            <img className="brand-logo" src={brainLogo} alt="Sematrix brain logo" />
+            <div>
+              <p className="eyebrow">Sematrix</p>
+              <p className="brand-caption">Local-first note memory with backend-driven search.</p>
+            </div>
+          </div>
           <h1>Search every note from one field.</h1>
           <p className="lede">
             The raw query is sent straight to <code>/api/notes</code>, so free

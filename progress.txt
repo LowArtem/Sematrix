@@ -3,6 +3,7 @@
 - Keep frontend note-grid pagination driven by backend `total`, `limit`, and `offset` fields so search, folder filtering, and later sidebar interactions reuse the same server-owned paging contract.
 - Keep frontend Draft creation behind a shared `POST /api/notes` helper so the grid's primary `+` card only creates the note and navigates to `/notes/{id}`, leaving later editor/image flows anchored to a real backend note id.
 - Keep note-card status rendering tied directly to backend `status`, `has_warnings`, and `warnings_count` fields, with Ready warnings shown as a separate indicator instead of a synthetic client-side status label.
+- When the Vite frontend starts importing image assets, add `frontend/src/vite-env.d.ts` with `vite/client` types so TypeScript accepts bundled PNG imports, including shared repo-root branding assets.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -1982,4 +1983,34 @@ Thread: CLI run
     - The Ready-with-warnings state should stay a separate indicator from the main status badge; collapsing it into a synthetic status label would blur the spec's distinction between status and warnings.
   - Useful context
     - `frontend/src/App.tsx` now has a reusable status-cluster area on each card, so later shell/sidebar work can reuse the same card header without changing the note-status contract.
+---
+
+## [2026-03-15 17:23:48 +0300] - EP-008 / US-056
+Epic: Frontend shell, main screen, sidebar, and card grid
+Epic Branch: ralph/sematrix-mvp/ep-008-frontend-shell-and-grid
+Story: Create the frontend application shell with Sematrix branding
+Thread: CLI run
+- What was implemented
+  - Imported the provided `brain_logo.png` into `frontend/src/App.tsx` and added a dedicated branding block in the top shell so the live interface now shows both the Sematrix name and the shipped logo asset.
+  - Extended `frontend/src/styles.css` with responsive brand-mark styling that fits the existing top-search panel without changing the backend-driven search flow or the overall shell layout.
+  - Added `frontend/src/vite-env.d.ts` so the Vite/TypeScript frontend can type-check bundled image imports cleanly.
+- Files changed
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/vite-env.d.ts`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (128 passed)
+- PRD updates made
+  - Marked `US-056` as passed and added a durable note about importing `brain_logo.png` into the top branding block while preserving the shell layout.
+  - Re-evaluated `EP-008`; it remains `passes: false` because the sidebar and reload-behavior stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - When the Vite frontend imports image assets, keep `vite/client` declarations in `frontend/src/vite-env.d.ts` so TypeScript accepts the asset modules without extra tooling.
+  - Gotchas encountered
+    - The provided branding asset lives at the repo root, so the frontend needs a normal Vite asset import path instead of assuming the file already exists under `frontend/public`.
+  - Useful context
+    - The top shell now uses the shipped Sematrix logo in the same panel as the global search copy, while later sidebar stories can build on the existing `content-grid` layout without revisiting branding.
 ---
