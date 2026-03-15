@@ -38,6 +38,16 @@ def test_note_list_service_parses_hashtags_before_repository_lookup() -> None:
     assert "parsed_query = parse_note_query(q)" in domain_source
 
 
+def test_note_list_service_keeps_tag_only_queries_on_listing_path() -> None:
+    domain_source = (BACKEND_APP / "domain" / "notes.py").read_text(encoding="utf-8")
+
+    assert "if parsed_query.text_query:" in domain_source
+    assert "return self._list_hybrid_notes(" in domain_source
+    assert "result = self._note_repository.list_notes(" in domain_source
+    assert "tag_names=parsed_query.tag_names," in domain_source
+    assert "text_query=parsed_query.text_query," in domain_source
+
+
 def test_note_list_repository_applies_and_tag_filter_and_stable_sort() -> None:
     infra_source = (BACKEND_APP / "infra" / "notes.py").read_text(encoding="utf-8")
 

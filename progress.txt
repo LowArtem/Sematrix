@@ -87,6 +87,34 @@ Thread: CLI run
     - `NoteService.list_notes(...)` now keeps empty-text queries on the plain listing path, while non-empty free-text queries go through query embedding, pgvector candidate retrieval, RRF fusion, and final note hydration through the same public `GET /api/notes` route.
 ---
 
+## [2026-03-15 17:18:13 +0300] - EP-007 / US-049
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement q parsing for free text and #tag filters
+Thread: CLI run
+- What was implemented
+  - Strengthened the query-parsing coverage so `parse_note_query(...)` now stays locked to whitespace-normalized free-text remainder behavior after hashtag removal, including multiline input where valid `#tag` filters and raw text are mixed.
+  - Added source-guard coverage that keeps tag-only searches on the plain listing path while still forwarding extracted tag filters into the shared `GET /api/notes` listing flow instead of the hybrid search path.
+- Files changed
+  - `backend/tests/test_note_list_api.py`
+  - `backend/tests/test_note_query_parsing.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_query_parsing.py backend/tests/test_note_list_api.py backend/tests/test_note_hybrid_search.py backend/tests/test_note_fts_search.py` ✅
+  - `python -m pytest` ✅ (138 passed)
+- PRD updates made
+  - Refreshed the `US-049` note to document multiline whitespace normalization in the remaining free-text query after hashtag extraction.
+  - Re-checked `EP-007`; its acceptance criteria remain satisfied.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Query parsing for `GET /api/notes` should keep tag-only searches on the plain listing path and reserve hybrid search only for requests with non-empty free text after hashtag removal.
+  - Gotchas encountered
+    - Parser coverage needs to account for newline and tab collapse after removing tags, or later regex tweaks can preserve formatting noise that changes the semantic query string.
+  - Useful context
+    - `app.domain.notes.parse_note_query(...)` and `NoteService.list_notes(...)` remain the single backend entrypoint for tag extraction plus list-vs-hybrid routing before repository search logic runs.
+---
+
 ## [2026-03-15 12:56:27 +0300] - EP-007 / US-049
 Epic: Hybrid search, search-document construction, and scoring
 Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
