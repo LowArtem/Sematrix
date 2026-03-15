@@ -24,6 +24,14 @@ type LoadState =
   | { status: "ready"; note: NoteDetail; folders: Folder[] }
   | { status: "error"; error: ApiError }
 
+type TagAutoConvertRequest = {
+  normalizedTag: string
+  completionText: string
+}
+
+const TAG_AUTO_CONVERT_PATTERN = /(^|[\s([{])#([0-9A-Za-zА-Яа-яЁё_]+)$/
+const TAG_AUTO_CONVERT_PUNCTUATION = new Set([",", ".", "!", "?", ";", ":", ")", "]"])
+
 function toApiError(error: unknown): ApiError {
   if (typeof error === "object" && error !== null && "message" in error) {
     const maybeError = error as Partial<ApiError>
@@ -117,13 +125,31 @@ function extractImageFiles(fileList: FileList | null): File[] {
   return Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"))
 }
 
+function getAutoConvertCompletionText(event: KeyboardEvent): string | null {
+  if (event.key === " ") {
+    return " "
+  }
+
+  if (event.key === "Enter") {
+    return ""
+  }
+
+  if (TAG_AUTO_CONVERT_PUNCTUATION.has(event.key)) {
+    return event.key
+  }
+
+  return null
+}
+
 function NoteEditor({
   noteId,
   contentJson,
+  onAutoConvertTag,
   onContentChange,
 }: {
   noteId: string
   contentJson: Record<string, unknown>
+  onAutoConvertTag: (request: TagAutoConvertRequest) => void
   onContentChange: (nextContent: Record<string, unknown>) => void
 }) {
   const [uploadState, setUploadState] = useState<{ status: "idle" | "uploading" | "error"; message: string }>({
@@ -151,6 +177,58 @@ function NoteEditor({
     ],
     content: contentJson,
     editorProps: {
+      handleKeyDown: (_view, event) => {
+        const completionText = getAutoConvertCompletionText(event)
+        if (!completionText || !editor) {
+          return false
+        }
+
+        if (editor.isActive("link") || editor.isActive("code") || editor.isActive("codeBlock")) {
+          return false
+        }
+
+        const { state } = editor
+        const { selection } = state
+
+        if (!selection.empty) {
+          return false
+        }
+
+        const { $from } = selection
+        const textBeforeCursor = $from.parent.textBetween(0, $from.parentOffset, undefined, "\ufffc")
+        const match = textBeforeCursor.match(TAG_AUTO_CONVERT_PATTERN)
+
+        if (!match) {
+          return false
+        }
+
+        try {
+          const normalizedTag = normalizeTagName(match[2])
+          const tokenStart = textBeforeCursor.length - match[0].length + match[1].length
+          const deleteFrom = $from.start() + tokenStart
+          const deleteTo = selection.from
+
+          event.preventDefault()
+          editor
+            .chain()
+            .focus()
+            .command(({ tr, dispatch }) => {
+              tr.delete(deleteFrom, deleteTo)
+              if (completionText) {
+                tr.insertText(completionText, deleteFrom)
+              }
+              if (dispatch) {
+                dispatch(tr)
+              }
+              return true
+            })
+            .run()
+          onAutoConvertTag({ normalizedTag, completionText })
+          return true
+        } catch {
+          return false
+        }
+      },
       handlePaste: (_view, event) => {
         const imageFiles = extractImageFiles(event.clipboardData?.files ?? null)
         if (!imageFiles.length) {
@@ -367,6 +445,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
   const [draftTags, setDraftTags] = useState<string[] | null>(null)
   const [tagInput, setTagInput] = useState("")
   const [tagError, setTagError] = useState<string | null>(null)
+  const tagInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -445,6 +524,15 @@ function NoteScreen({ noteId }: { noteId: string }) {
   function handleRemoveTag(tagName: string): void {
     setDraftTags((currentTags) => (currentTags ?? []).filter((currentTag) => currentTag !== tagName))
     setTagError(null)
+  }
+
+  function handleAutoConvertTag({ normalizedTag }: TagAutoConvertRequest): void {
+    setDraftTags((currentTags) => normalizeTagNames([...(currentTags ?? displayedTags), normalizedTag]))
+    setTagInput("")
+    setTagError(null)
+    window.setTimeout(() => {
+      tagInputRef.current?.focus()
+    }, 0)
   }
 
   return (
@@ -526,6 +614,7 @@ function NoteScreen({ noteId }: { noteId: string }) {
 
             <div className="tag-editor-row">
               <input
+                ref={tagInputRef}
                 className="text-field"
                 value={tagInput}
                 onChange={(event) => {
@@ -555,9 +644,14 @@ function NoteScreen({ noteId }: { noteId: string }) {
           <section className="field-block">
             <div className="section-heading">
               <span className="field-label">Editor Content</span>
-              <span className="section-caption">Tiptap editor with serialized JSON preview</span>
+              <span className="section-caption">Type a valid #tag and finish with space, Enter, or punctuation to convert it into a note tag.</span>
             </div>
-            <NoteEditor noteId={note.id} contentJson={note.content_json} onContentChange={setDraftContentJson} />
+            <NoteEditor
+              noteId={note.id}
+              contentJson={editorContentJson}
+              onAutoConvertTag={handleAutoConvertTag}
+              onContentChange={setDraftContentJson}
+            />
             <textarea className="editor-surface" value={serializedContentJson} readOnly />
           </section>
 

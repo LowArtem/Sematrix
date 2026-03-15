@@ -1098,8 +1098,8 @@
             "The whole conversion is one undo transaction in Tiptap"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This behavior is explicitly defined step by step in section 4.3 and must not be implemented as multiple independent undo actions."
+          "passes": true,
+          "notes": "This behavior is explicitly defined step by step in section 4.3 and must not be implemented as multiple independent undo actions. The note editor now watches normal-text completion keys in one shared Tiptap keydown path, ignores link/code contexts, removes the finished `#tag` token in a single transaction, normalizes and merges the tag into the note tag list, and moves focus to the tag input for the follow-up rollback story."
         },
         {
           "id": "US-070",
@@ -1144,7 +1144,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, image insertion flows, and manual tag editing are now in place, but the epic remains open until inline image rendering, tag auto-conversion/rollback, save-delete-reindex wiring, and warning-detail stories are finished."
+      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, image insertion flows, manual tag editing, and one-transaction `#tag` auto-conversion are now in place, but the epic remains open until inline image rendering, auto-conversion rollback, save-delete-reindex wiring, and warning-detail stories are finished."
     },
     {
       "id": "EP-010",

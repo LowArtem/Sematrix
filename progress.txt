@@ -2,6 +2,7 @@
 - Keep frontend note-detail and folder reads in shared `frontend/src/api.ts` helpers so route components stay focused on screen state while `/api/notes/{id}` and `/api/folders` contracts remain centralized.
 - Keep the frontend Tiptap extension set centralized in one note-editor component and derive updated `content_json` from `editor.getJSON()` there, so later Save/image/tag stories can share one editor source of truth.
 - Keep note-editor image insertion behind one shared frontend upload helper so toolbar upload, drag-drop, and clipboard paste all create the same assetId-backed Tiptap image nodes instead of drifting into per-flow data URL handling.
+- Keep note-editor `#tag` auto-conversion in one shared Tiptap keydown path that only runs in normal text, deletes the finished token in a single transaction, and then hands normalized tag/focus updates back to screen state so later rollback behavior has one place to hook into.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -79,6 +80,40 @@ Thread: CLI run
     - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
   - Useful context
     - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 17:01:05 +0300] - EP-009 / US-069
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement #tag auto-conversion from normal editor text as one undo transaction
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/App.tsx` so the note editor now watches space, Enter, and punctuation completion keys in one shared Tiptap `handleKeyDown` path, skips link/code contexts, removes the finished `#tag` token in a single transaction, and hands the normalized tag back to the note screen state.
+  - Updated the note screen tag area to focus the manual tag input after auto-conversion, merge converted tags through the shared frontend normalization helper, and describe the conversion behavior beside the editor.
+  - Added `backend/tests/test_note_editor_tag_autoconversion.py`, updated `backend/tests/test_note_detail_screen.py`, and preserved the reusable editor-conversion rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_tag_autoconversion.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `python -m pytest` ✅ (134 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-069` as passed and added a durable note about the shared normal-text keydown conversion flow, single-transaction token removal, and tag-input focus handoff.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, rollback behavior, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-editor hashtag conversion in one keydown path so later rollback shortcuts can build on the same conversion metadata and transaction boundaries.
+  - Gotchas encountered
+    - Existing source-guard tests for the note detail screen can overfit JSX call shapes; when the editor gains new props, prefer asserting the important prop lines instead of one exact single-line component invocation.
+  - Useful context
+    - `NoteScreen` now owns the tag-input ref and post-conversion tag merge, while `NoteEditor` owns only the normal-text detection and single-transaction text removal inside Tiptap.
 ---
 
 ## [2026-03-15 12:40:10 +0300] - EP-009 / US-066
