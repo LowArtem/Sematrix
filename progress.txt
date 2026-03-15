@@ -47,6 +47,38 @@
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
 - Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
 - Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
+- Keep note lexical search in `app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery` expression for both `@@` matching and `ts_rank_cd` ranking.
+
+## [2026-03-15 11:39:11 +0300] - EP-007 / US-052
+Epic: Hybrid search, search-document construction, and scoring
+Epic Branch: ralph/sematrix-mvp/ep-007-hybrid-search
+Story: Implement RU+EN full-text querying using the stored generated search_tsv column
+Thread: CLI run
+- What was implemented
+  - Added `build_note_search_tsquery(...)` plus `list_lexical_search_candidates(...)` in `backend/app/infra/notes.py` so lexical search now targets the stored `notes.search_tsv` column with the fixed RU+EN `websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q)` pattern.
+  - Refactored note filtering in `backend/app/infra/notes.py` through a shared filtered-note-id query helper so folder/tag filters can be reused by both the existing listing path and the new lexical candidate path without drifting.
+  - Added `backend/tests/test_note_fts_search.py` source guards and refreshed `AGENTS.md` with the durable RU+EN `search_tsv` / `ts_rank_cd` repository rule.
+- Files changed
+  - `AGENTS.md`
+  - `backend/app/infra/notes.py`
+  - `backend/tests/test_note_fts_search.py`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_fts_search.py backend/tests/test_note_list_api.py` ✅
+  - `python -m compileall backend/app && python -m pytest` ✅ (127 passed)
+  - `docker compose build backend` ✅
+- PRD updates made
+  - Marked `US-052` as passed and added a durable note about the shared RU+EN tsquery builder, `search_tsv`-backed lexical candidate retrieval, and `ts_rank_cd` ordering.
+  - Re-evaluated `EP-007`; it remains `passes: false` because the vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the RU+EN tsquery builder in the note repository layer and reuse the exact same expression for `@@` matching and lexical ranking so PostgreSQL FTS stays aligned with the stored generated `search_tsv` column.
+  - Gotchas encountered
+    - Host-side pytest in this repo does not have SQLAlchemy installed, so search-repository coverage for now needs to stay source-based unless the check is run inside the backend container.
+  - Useful context
+    - `list_lexical_search_candidates(...)` is ready for the later vector/RRF stories to consume after folder/tag filtering, while the public `GET /api/notes` hybrid behavior still waits for the remaining EP-007 stories.
+---
 
 ## [2026-03-15 11:33:21 +0300] - EP-007 / US-051
 Epic: Hybrid search, search-document construction, and scoring

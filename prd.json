@@ -834,8 +834,8 @@
             "The backend does not switch to simple config or a custom merged config"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The full-text pattern is explicitly fixed in the specification and must be used consistently in all queries."
+          "passes": true,
+          "notes": "The full-text pattern is explicitly fixed in the specification and must be used consistently in all queries. `app.infra.notes` now centralizes the RU+EN `websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q)` builder and a `search_tsv`-backed lexical candidate query that uses the same tsquery for both `@@` matching and `ts_rank_cd` ordering after folder/tag filters are applied."
         },
         {
           "id": "US-053",
@@ -882,7 +882,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes. Query parsing, shared search-document construction, and note embedding generation/validation are now in place, but the RU+EN runtime FTS query path, vector candidate retrieval, RRF fusion, and final hybrid `GET /api/notes` behavior are still open."
+      "notes": "This epic must follow the exact RU+EN full-text pattern and the exact RRF formula from section 4.7. Do not substitute max-normalized scoring or ANN indexes. Query parsing, shared search-document construction, note embedding generation/validation, and the shared RU+EN runtime FTS query path are now in place, but vector candidate retrieval, RRF fusion, and the final hybrid `GET /api/notes` behavior are still open."
     },
     {
       "id": "EP-008",
