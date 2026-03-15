@@ -123,6 +123,8 @@ Do not move business logic into route handlers or UI code.
 - Individual OCR/link/caption stages must not be launched ad hoc from API routes.
 - Only `finalize_pipeline(...)` or `pipeline_failed(...)` may set the final note state to `Ready` or `Error`.
 - `finalize_pipeline(...)` must read durable current-run stage outputs from PostgreSQL and rebuild `search_text`, `embedding`, and final `summary` from that stored state, not from large Celery callback payloads.
+- Route finalizer task exceptions back through `pipeline_failed(...)` as well, so zero-stage/direct-finalize runs still end in `Ready` or `Error` instead of getting stuck in `Processing`.
+- Save-time note updates should set the fast-phase `search_text` through the shared search-document builder using only currently available note fields, while finalization rebuilds the full `search_text` from durable OCR/link outputs without feeding `note.summary` back into the document.
 
 ### Worker granularity
 
@@ -145,6 +147,8 @@ Do not move business logic into route handlers or UI code.
 - Search is **hybrid**: lexical + semantic.
 - Lexical search must use stored/indexed PostgreSQL FTS data, not ad hoc `to_tsvector(...)` per request.
 - The FTS strategy is fixed to **RU + EN**, using explicit Russian and English configurations.
+- Keep note lexical search in `backend/app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery('russian', q) || websearch_to_tsquery('english', q)` expression for both `@@` matching and `ts_rank_cd` ranking.
+- Keep hybrid-search RRF fusion in a backend domain helper, use the same `RRF_TOPN` preselect for both lexical and vector candidate lists after folder/tag filters, and apply `limit/offset` only after fused `score desc, updated_at desc, id desc` sorting.
 - Semantic search uses the note embedding stored in pgvector.
 - Hybrid ranking uses **RRF**, not page-local score normalization.
 - `search_text` is the canonical search document.

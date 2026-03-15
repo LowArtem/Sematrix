@@ -48,6 +48,12 @@ def get_asset_service(session: Session = Depends(get_db_session)) -> AssetServic
 
 def get_note_service(session: Session = Depends(get_db_session)) -> NoteService:
     settings = get_settings()
+    ollama_client = OllamaClient(
+        base_url=settings.ollama_url,
+        llm_model=settings.llm_model,
+        embed_model=settings.embed_model,
+        vision_model=settings.vision_model,
+    )
     return NoteService(
         note_repository=SqlAlchemyNoteRepository(session=session),
         pipeline_dispatcher=CeleryPipelineDispatcher(),
@@ -57,4 +63,7 @@ def get_note_service(session: Session = Depends(get_db_session)) -> NoteService:
             embed_model=settings.embed_model,
             vision_model=settings.vision_model,
         ),
+        semantic_search_client=ollama_client,
+        rrf_k=settings.rrf_k,
+        rrf_topn=settings.rrf_topn,
     )

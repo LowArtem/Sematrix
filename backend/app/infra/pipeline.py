@@ -24,6 +24,7 @@ from app.domain.pipeline import (
     is_noncritical_pipeline_stage,
     merge_processing_warnings,
     normalize_pipeline_stage_name,
+    validate_note_embedding,
 )
 from app.infra.assets import get_asset_path
 from app.infra.link_fetcher import LinkFetchError, SafeLinkFetcher
@@ -2069,8 +2070,7 @@ class PipelineFinalizer:
         embeddings_started_at = perf_counter()
         embedding = self._ollama_client.embed_text(text=search_text)
         embeddings_duration_ms = int((perf_counter() - embeddings_started_at) * 1000)
-        if len(embedding) != 1024:
-            raise ValueError("Embedding dimensionality must be exactly 1024")
+        validate_note_embedding(embedding)
 
         summary_started_at = perf_counter()
         summary = self._ollama_client.generate_summary(search_text=search_text) if search_text else ""

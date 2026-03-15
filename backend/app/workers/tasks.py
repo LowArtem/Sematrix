@@ -254,13 +254,27 @@ def finalize_pipeline(
     )
     session = SessionLocal()
     try:
-        return build_pipeline_finalizer(session=session).finalize_pipeline(
-            note_id=UUID(note_id),
-            index_version=index_version,
-            pipeline_run_id=UUID(pipeline_run_id),
-            request_id=request_id,
-            stage_results=stage_results,
-        )
+        try:
+            return build_pipeline_finalizer(session=session).finalize_pipeline(
+                note_id=UUID(note_id),
+                index_version=index_version,
+                pipeline_run_id=UUID(pipeline_run_id),
+                request_id=request_id,
+                stage_results=stage_results,
+            )
+        except Exception as exc:
+            session.rollback()
+            return build_pipeline_failure_handler(session=session).handle_failure(
+                note_id=UUID(note_id),
+                index_version=index_version,
+                pipeline_run_id=UUID(pipeline_run_id),
+                request_id=request_id,
+                callback_args=(),
+                callback_kwargs={
+                    "failed_task_name": self.name,
+                    "processing_error": str(exc),
+                },
+            )
     finally:
         session.close()
 
