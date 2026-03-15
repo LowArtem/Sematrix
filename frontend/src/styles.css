@@ -312,10 +312,52 @@ dd {
 }
 
 .status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.35rem 0.75rem;
   border-radius: 999px;
   background: rgba(31, 106, 111, 0.12);
   color: #184f54;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.status-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.status-draft {
+  background: rgba(118, 102, 73, 0.14);
+  color: #6a5130;
+}
+
+.status-processing {
+  background: rgba(24, 79, 84, 0.14);
+  color: #184f54;
+}
+
+.status-ready {
+  background: rgba(42, 122, 72, 0.14);
+  color: #25623d;
+}
+
+.status-error {
+  background: rgba(177, 49, 49, 0.14);
+  color: #8f2020;
+}
+
+.warning-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(194, 119, 22, 0.14);
+  color: #9a5f1a;
   font-size: 0.82rem;
   font-weight: 700;
 }
@@ -392,5 +434,9 @@ dd {
 
   .pagination-button {
     width: 100%;
+  }
+
+  .status-cluster {
+    justify-content: flex-start;
   }
 }

@@ -24,5 +24,21 @@ def test_note_cards_render_backend_note_fields_without_client_ranking() -> None:
     assert 'className="note-card"' in app_source
     assert 'buildCardSummary(note)' in app_source
     assert 'className="tag-list"' in app_source
-    assert 'className="status-pill"' in app_source
+    assert 'className={buildStatusClassName(note.status)}' in app_source
     assert 'grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));' in style_source
+
+
+def test_note_cards_show_backend_status_badges_and_ready_warning_indicator() -> None:
+    app_source = (FRONTEND_SRC / "App.tsx").read_text(encoding="utf-8")
+    style_source = (FRONTEND_SRC / "styles.css").read_text(encoding="utf-8")
+
+    assert 'function buildStatusClassName(status: string): string {' in app_source
+    assert 'return `status-pill status-${status.toLowerCase()}`' in app_source
+    assert 'note.status === "Ready" && note.has_warnings ? (' in app_source
+    assert 'className="warning-pill"' in app_source
+    assert 'buildWarningLabel(note.warnings_count)' in app_source
+    assert '.status-draft {' in style_source
+    assert '.status-processing {' in style_source
+    assert '.status-ready {' in style_source
+    assert '.status-error {' in style_source
+    assert '.warning-pill {' in style_source

@@ -2,6 +2,7 @@
 - Keep frontend note-list/search requests in a shared `frontend/src/api.ts` helper so the UI forwards raw `q` plus backend-owned `folder_id`/`limit`/`offset` params to `/api/notes` without client-side hashtag parsing.
 - Keep frontend note-grid pagination driven by backend `total`, `limit`, and `offset` fields so search, folder filtering, and later sidebar interactions reuse the same server-owned paging contract.
 - Keep frontend Draft creation behind a shared `POST /api/notes` helper so the grid's primary `+` card only creates the note and navigates to `/notes/{id}`, leaving later editor/image flows anchored to a real backend note id.
+- Keep note-card status rendering tied directly to backend `status`, `has_warnings`, and `warnings_count` fields, with Ready warnings shown as a separate indicator instead of a synthetic client-side status label.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -79,7 +80,6 @@ Thread: CLI run
   - Useful context
     - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
 ---
-
 
 ## [2026-03-15 11:55:50 +0300] - EP-008 / US-057
 Epic: Frontend shell, main screen, sidebar, and card grid
@@ -1951,4 +1951,35 @@ Thread: CLI run
     - The create-note card should manage its own pending state; otherwise repeated clicks can enqueue multiple Draft notes before navigation happens.
   - Useful context
     - `frontend/src/App.tsx` now always renders the primary create-note card ahead of backend-loaded note cards, so later sidebar and status-indicator stories can extend the grid without moving the Draft entrypoint.
+---
+
+## [2026-03-15 13:14:36 +0300] - EP-008 / US-062
+Epic: Frontend shell, main screen, sidebar, and card grid
+Epic Branch: ralph/sematrix-mvp/ep-008-frontend-shell-and-grid
+Story: Show status badges and warning indicators on note cards
+Thread: CLI run
+- What was implemented
+  - Updated `frontend/src/App.tsx` so note cards now render backend-driven status badges for Draft, Processing, Ready, and Error, with the badge tone derived only from the API `status` field.
+  - Added a separate Ready-state warning pill that appears only when the backend returns `status=Ready` plus `has_warnings=true`, using `warnings_count` for the label instead of inferring warning state locally.
+  - Refreshed `frontend/src/styles.css` with dedicated badge styles and extended `backend/tests/test_frontend_note_grid.py` to lock in the status-badge and warning-indicator rendering contract.
+- Files changed
+  - `backend/tests/test_frontend_note_grid.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_frontend_note_grid.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (128 passed)
+- PRD updates made
+  - Marked `US-062` as passed and added a durable note about backend-driven status badges plus a separate Ready-with-warnings indicator sourced from `has_warnings` and `warnings_count`.
+  - Re-evaluated `EP-008`; it remains `passes: false` because the branding shell, sidebar, and reload behavior stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-card status rendering directly tied to backend `status` / `has_warnings` / `warnings_count` fields so the frontend only styles persisted state instead of inferring processing outcomes.
+  - Gotchas encountered
+    - The Ready-with-warnings state should stay a separate indicator from the main status badge; collapsing it into a synthetic status label would blur the spec's distinction between status and warnings.
+  - Useful context
+    - `frontend/src/App.tsx` now has a reusable status-cluster area on each card, so later shell/sidebar work can reuse the same card header without changing the note-status contract.
 ---

@@ -985,8 +985,8 @@
             "The frontend uses backend status/warning fields and does not infer processing state locally"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly distinguishes main status from warning state and requires the UI to show both."
+          "passes": true,
+          "notes": "The spec explicitly distinguishes main status from warning state and requires the UI to show both. The note grid now renders backend-driven Draft/Processing/Ready/Error badges with dedicated visual treatments, and Ready cards with `has_warnings=true` show a separate warning pill derived from `warnings_count` instead of inferring warning state locally from anything else."
         },
         {
           "id": "US-063",

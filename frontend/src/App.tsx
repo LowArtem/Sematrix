@@ -35,6 +35,14 @@ function buildCardSummary(note: NoteCard): string {
   return "Open this note to add a summary-worthy detail."
 }
 
+function buildStatusClassName(status: string): string {
+  return `status-pill status-${status.toLowerCase()}`
+}
+
+function buildWarningLabel(warningsCount: number): string {
+  return warningsCount === 1 ? "1 warning" : `${warningsCount} warnings`
+}
+
 export default function App() {
   const [queryInput, setQueryInput] = useState("")
   const [submittedQuery, setSubmittedQuery] = useState("")
@@ -221,27 +229,32 @@ export default function App() {
                 </li>
                 {noteList.items.map((note) => (
                   <li className="note-card" key={note.id}>
-                  <div className="note-item-header">
-                    <p className="note-kicker">Note</p>
-                    <span className="status-pill">{note.status}</span>
-                  </div>
-                  <h3>{note.title || "Untitled note"}</h3>
-                  <p className="note-summary">{buildCardSummary(note)}</p>
-                  <ul className="tag-list" aria-label="Note tags">
-                    {note.tags.length > 0 ? (
-                      note.tags.map((tag) => (
-                        <li className="tag-chip" key={tag.id}>
-                          #{tag.name}
-                        </li>
-                      ))
-                    ) : (
-                      <li className="tag-chip muted-tag">No tags yet</li>
-                    )}
-                  </ul>
-                  <div className="note-meta-row">
-                    <span>{formatUpdatedAt(note.updated_at)}</span>
-                    <span>{note.folder_id ? "Filed note" : "Unfiled"}</span>
-                  </div>
+                    <div className="note-item-header">
+                      <p className="note-kicker">Note</p>
+                      <div className="status-cluster">
+                        <span className={buildStatusClassName(note.status)}>{note.status}</span>
+                        {note.status === "Ready" && note.has_warnings ? (
+                          <span className="warning-pill">{buildWarningLabel(note.warnings_count)}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <h3>{note.title || "Untitled note"}</h3>
+                    <p className="note-summary">{buildCardSummary(note)}</p>
+                    <ul className="tag-list" aria-label="Note tags">
+                      {note.tags.length > 0 ? (
+                        note.tags.map((tag) => (
+                          <li className="tag-chip" key={tag.id}>
+                            #{tag.name}
+                          </li>
+                        ))
+                      ) : (
+                        <li className="tag-chip muted-tag">No tags yet</li>
+                      )}
+                    </ul>
+                    <div className="note-meta-row">
+                      <span>{formatUpdatedAt(note.updated_at)}</span>
+                      <span>{note.folder_id ? "Filed note" : "Unfiled"}</span>
+                    </div>
                   </li>
                 ))}
               </ul>
