@@ -4,6 +4,11 @@
 - Keep frontend Draft creation behind a shared `POST /api/notes` helper so the grid's primary `+` card only creates the note and navigates to `/notes/{id}`, leaving later editor/image flows anchored to a real backend note id.
 - Keep note-card status rendering tied directly to backend `status`, `has_warnings`, and `warnings_count` fields, with Ready warnings shown as a separate indicator instead of a synthetic client-side status label.
 - When the Vite frontend starts importing image assets, add `frontend/src/vite-env.d.ts` with `vite/client` types so TypeScript accepts bundled PNG imports, including shared repo-root branding assets.
+- Keep frontend note-detail and folder reads in shared `frontend/src/api.ts` helpers so route components stay focused on screen state while `/api/notes/{id}` and `/api/folders` contracts remain centralized.
+- Keep the frontend Tiptap extension set centralized in one note-editor component and derive updated `content_json` from `editor.getJSON()` there, so later Save/image/tag stories can share one editor source of truth.
+- Keep note-editor image insertion behind one shared frontend upload helper so toolbar upload, drag-drop, and clipboard paste all create the same assetId-backed Tiptap image nodes instead of drifting into per-flow data URL handling.
+- Keep note-editor inline image rendering inside that same centralized image extension, deriving `/api/assets/{assetId}` from `assetId` so reloaded notes still display images even when stored `content_json` omits `src`.
+- Keep note-editor `#tag` auto-conversion in one shared Tiptap keydown path that only runs in normal text, deletes the finished token in a single transaction, and then hands normalized tag/focus updates back to screen state so later rollback behavior has one place to hook into.
 - Derive `GET /api/notes` hashtag parsing from the shared tag-name validator so search-time `#tag` extraction stays aligned with backend tag normalization rules.
 - Treat a search hashtag as valid only when it ends at the query boundary or common closing punctuation, so invalid tokens like `#bad-tag` stay in free text instead of being partially stripped into a false tag filter.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
@@ -30,6 +35,7 @@
 - Keep note-list query parsing in `app/domain/notes.py` so `#tag` extraction and normalized-tag filtering can be reused later when search ranking changes behind the same `GET /api/notes` contract.
 - Treat punctuation-only leftovers after stripping valid `#tags` from `q` as an empty text query, so tag-only note searches stay on the stable listing path instead of accidentally triggering hybrid text search.
 - Keep Tiptap save parsing in a dedicated domain helper so note-save flows reuse one source for flattened text, `assetId` extraction, and normalized `http/https` link extraction before syncing `note_assets` and `note_links`.
+- Keep note-editor tag normalization in one frontend helper that mirrors the backend lowercase/no-spaces/allowed-character rules, so manual tag entry and later `#tag` auto-conversion reuse the same UX guardrails without changing backend ownership.
 - Keep the Draft-versus-Processing decision in a shared domain helper so save flows and later Draft-cleanup logic can reuse the exact meaningful-content rule.
 - Keep Draft reset defaults in a shared domain helper so empty saves clear `summary`, `search_text`, `embedding`, and warning/error fields consistently whenever a note falls back to `Draft`.
 - For SQLAlchemy relationships that rely on database `ON DELETE` behavior, set `passive_deletes=True` on the ORM relationship so note/asset cleanup does not try to null non-nullable foreign keys before the database cascade runs.
@@ -52,10 +58,12 @@
 - Keep text-file link handling in `app/infra/pipeline.py` on top of the shared safe fetcher, enforce `MAX_TEXT_FILE_MB` separately from the fetcher's global body cap, and fall back to a warning-backed heuristic summary when the non-thinking Ollama summary call fails after text extraction succeeds.
 - Keep generic webpage link handling on top of the shared safe fetcher, extract main text in `app/infra/web_pages.py` with trafilatura first and readability-lxml fallback, and fall back to a warning-backed heuristic summary when non-thinking page summarization fails after extraction succeeds.
 - Mirror per-object non-critical OCR/link/caption warnings onto `notes.processing_warnings` as soon as a stage writes its durable result, so note detail polling can surface warnings before finalization while final Ready-state deduplication still relies on the stage tables.
+- Keep note-screen Save/Reindex/Delete calls in shared `frontend/src/api.ts` helpers and refresh note detail with normal REST reads after accepted mutations so the editor reflects persisted backend state without inventing SSE/WebSocket status logic.
 - Build `search_text` through the shared domain helper in both phases: save-time writes the fast document from currently available note fields, and finalization rebuilds the full document from durable OCR/link outputs without feeding `note.summary` back into it.
 - Route finalizer task exceptions through the shared pipeline failure handler too, so zero-stage/direct-finalize runs still mark notes `Error` on embedding/finalization failures instead of getting stuck in `Processing`.
 - Keep note lexical search in `app/infra/notes.py` on top of stored `notes.search_tsv`, and reuse the same RU+EN `websearch_to_tsquery` expression for both `@@` matching and `ts_rank_cd` ranking.
 - Keep hybrid-search RRF fusion in a shared domain helper, reuse one `RRF_TOPN` value for both lexical and vector candidate preselect queries after filters, and paginate only after the fused `score desc, updated_at desc, id desc` ordering is built.
+- Keep note-detail warning rendering driven by a typed frontend warning contract, and normalize missing `stage`/`target`/`code` fields in one helper so the UI can show backend warning metadata without inventing new client-side pipeline semantics.
 
 ## [2026-03-15 11:48:59 +0300] - EP-007 / US-054
 Epic: Hybrid search, search-document construction, and scoring
@@ -338,6 +346,167 @@ Thread: CLI run
     - Persisting only the fast summary on save is not enough for the hybrid-search epic; `notes.search_text` also has to be written during the save transaction or the stored FTS document stays stale until finalization.
   - Useful context
     - `NoteService.save_note(...)` now passes a fast-phase `search_text` into the repository, while `sematrix.finalize_pipeline` still owns the enriched rebuild that adds OCR/caption/link-derived text for the same note version.
+---
+
+## [2026-03-15 17:08:39 +0300] - EP-009 / US-070
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement Ctrl+Z and Backspace rollback for tag auto-conversion
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/App.tsx` so the note editor exposes a rollback handle for the latest auto-converted hashtag, clears that rollback state when later editor edits supersede it, and restores the original token through one Tiptap undo step.
+  - Updated the note screen tag area to track whether the latest auto-conversion actually added a tag, remove that tag only when appropriate during rollback, and wire both Ctrl+Z and empty-input Backspace on the tag field to the shared rollback path.
+  - Expanded `backend/tests/test_note_editor_tag_autoconversion.py` source guards to lock in the rollback handle, latest-conversion tracking, and tag-input keyboard shortcuts.
+- Files changed
+  - `backend/tests/test_note_editor_tag_autoconversion.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (136 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-070` as passed and added a durable note about latest-conversion-only rollback, Tiptap undo restoration, and the shared Ctrl+Z/Backspace rollback path.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep hashtag rollback tied to the latest auto-conversion only, and drive editor restoration through one `undo()` path so the token restore stays aligned with the original single-transaction conversion behavior.
+  - Gotchas encountered
+    - Rollback should remove the converted tag only if that conversion actually introduced it; if the tag already existed on the note, restoring the text must not strip the pre-existing tag chip.
+  - Useful context
+    - `NoteEditor` now owns the editor-side rollback eligibility and undo call, while `NoteScreen` owns tag-list rollback state plus the tag-input Ctrl+Z and Backspace keyboard handling.
+---
+
+## [2026-03-15 17:01:05 +0300] - EP-009 / US-069
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement #tag auto-conversion from normal editor text as one undo transaction
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/App.tsx` so the note editor now watches space, Enter, and punctuation completion keys in one shared Tiptap `handleKeyDown` path, skips link/code contexts, removes the finished `#tag` token in a single transaction, and hands the normalized tag back to the note screen state.
+  - Updated the note screen tag area to focus the manual tag input after auto-conversion, merge converted tags through the shared frontend normalization helper, and describe the conversion behavior beside the editor.
+  - Added `backend/tests/test_note_editor_tag_autoconversion.py`, updated `backend/tests/test_note_detail_screen.py`, and preserved the reusable editor-conversion rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_tag_autoconversion.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tag_autoconversion.py backend/tests/test_note_editor_tiptap.py` ✅
+  - `python -m pytest` ✅ (134 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-069` as passed and added a durable note about the shared normal-text keydown conversion flow, single-transaction token removal, and tag-input focus handoff.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, rollback behavior, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-editor hashtag conversion in one keydown path so later rollback shortcuts can build on the same conversion metadata and transaction boundaries.
+  - Gotchas encountered
+    - Existing source-guard tests for the note detail screen can overfit JSX call shapes; when the editor gains new props, prefer asserting the important prop lines instead of one exact single-line component invocation.
+  - Useful context
+    - `NoteScreen` now owns the tag-input ref and post-conversion tag merge, while `NoteEditor` owns only the normal-text detection and single-transaction text removal inside Tiptap.
+---
+
+## [2026-03-15 12:40:10 +0300] - EP-009 / US-066
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement inline image insertion with drag-drop, paste, and upload button
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/api.ts` with a shared `uploadImage(...)` helper for `POST /api/assets/image`, plus an `Asset` type that the editor can reuse across image insertion flows.
+  - Updated `frontend/src/App.tsx` so the centralized Tiptap editor now uses an asset-aware image extension, uploads images from the toolbar file picker, drag-drop, and clipboard paste, and inserts inline image nodes that persist `assetId` while using the backend asset URL only for rendering.
+  - Added upload-status feedback styles in `frontend/src/styles.css`, refreshed the note-detail source guard for the editor props, added `backend/tests/test_note_editor_images.py`, and preserved the reusable assetId-backed image-upload rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_images.py`
+  - `python -m pytest backend/tests/test_note_editor_images.py backend/tests/test_note_editor_tiptap.py backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (129 passed)
+  - `npm run build` ✅
+- PRD updates made
+  - Marked `US-066` as passed and added a durable note about the shared upload helper plus assetId-backed Tiptap image nodes.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, manual tags, auto-conversion/rollback, action wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-editor image insertion behind one shared upload helper so all entry paths create the same assetId-backed node shape and hit the same backend contract.
+  - Gotchas encountered
+    - The image node may store a derived backend URL for rendering, but `assetId` still has to remain the durable source of truth in `content_json` so later reload/render flows do not depend on transient data URLs.
+  - Useful context
+    - `frontend/src/App.tsx` now handles paste/drop/file-picker uploads inside the existing Tiptap note editor, so the remaining inline-image rendering story can build on already persisted assetId-aware nodes.
+---
+
+## [2026-03-15 12:21:21 +0300] - EP-009 / US-064
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement the note detail screen and backend data loading flow
+Thread: CLI run
+- What was implemented
+  - Replaced the frontend placeholder with a route-aware note detail screen that loads `GET /api/notes/{id}` and `GET /api/folders` through shared `frontend/src/api.ts` helpers and renders the loaded `NoteDetailDto` fields in a dedicated note workspace layout.
+  - Added note detail UI sections for title, folder selection, tags, content JSON, summary, status, warnings, processing error, and the Save/Reindex/Delete action row, while keeping unknown note IDs user-visible through the backend `ApiErrorDto` message/code.
+  - Added `backend/tests/test_note_detail_screen.py` source guards for the new frontend API helpers, note-route loading flow, rendered detail fields, and backend-error handling.
+- Files changed
+  - `backend/tests/test_note_detail_screen.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (124 passed)
+- PRD updates made
+  - Marked `US-064` as passed and added a durable note about the note-detail route, shared frontend API helpers, and direct backend-error surfacing.
+  - Re-evaluated `EP-009`; it remains `passes: false` because the Tiptap, image, tag-editing, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-detail and folder fetches in shared frontend API helpers so future editor stories can reuse the same REST contracts without duplicating fetch/error logic in route components.
+  - Gotchas encountered
+    - The note-detail route needs folder data alongside `NoteDetailDto` on first load, or the folder selector cannot render the current `folder_id` coherently.
+- Useful context
+  - `frontend/src/App.tsx` now treats `/notes/:id` as the editor route and shows backend error payloads directly, which later Tiptap and action stories can build on without changing the route contract.
+---
+
+## [2026-03-15 12:25:05 +0300] - EP-009 / US-065
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Configure Tiptap with the exact minimum editor feature set
+Thread: CLI run
+- What was implemented
+  - Replaced the note-detail JSON-only content area with a real Tiptap editor in `frontend/src/App.tsx`, using a centralized extension set built from StarterKit plus Link and inline Image support.
+  - Added a formatting toolbar for paragraphs, headings, bold, italic, bullet/ordered lists, block quotes, code blocks, and links, while mirroring each editor update back to serialized `content_json` via `editor.getJSON()` for later Save wiring.
+  - Added frontend source-guard coverage in `backend/tests/test_note_editor_tiptap.py`, refreshed the note-detail screen source checks, updated `frontend/package.json` + `frontend/package-lock.json`, and documented the reusable editor-source-of-truth rule in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_tiptap.py`
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tiptap.py backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (127 passed)
+- PRD updates made
+  - Marked `US-065` as passed and added a durable note about the centralized Tiptap extension set, the supported formatting surface, and `editor.getJSON()`-backed `content_json` serialization.
+  - Re-evaluated `EP-009`; it remains `passes: false` because image insertion/rendering, manual tags, auto-conversion/rollback, actions, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep the Tiptap extension set centralized in one note-editor component and derive outgoing `content_json` from `editor.getJSON()` there, so later note actions reuse one frontend source of truth.
+  - Gotchas encountered
+    - Existing source-guard tests for the note screen may assert exact serialization snippets, so editor upgrades need those guards refreshed alongside the UI changes.
+  - Useful context
+    - `frontend/src/App.tsx` now has a live Tiptap surface with the MVP formatting baseline, while image uploads, asset-backed rendering, and save/delete/reindex wiring still intentionally wait for later EP-009 stories.
 ---
 
 ## [2026-03-15 11:55:50 +0300] - EP-008 / US-057
@@ -2271,4 +2440,129 @@ Thread: CLI run
     - The provided branding asset lives at the repo root, so the frontend needs a normal Vite asset import path instead of assuming the file already exists under `frontend/public`.
   - Useful context
     - The top shell now uses the shipped Sematrix logo in the same panel as the global search copy, while later sidebar stories can build on the existing `content-grid` layout without revisiting branding.
+---
+
+## [2026-03-15 13:08:45 +0300] - EP-009 / US-068
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement manual tag management UI on the note screen
+Thread: CLI run
+- What was implemented
+  - Added a shared frontend tag helper in `frontend/src/tags.ts` that trims, lowercases, validates, and deduplicates tag names with the same Latin/Cyrillic/digit/underscore rules used by the backend.
+  - Updated `frontend/src/App.tsx` so the note screen now keeps editable draft tags, renders removable tag chips, provides a dedicated add-tag input with Enter/button submit, and shows inline validation feedback instead of the old read-only tag field.
+  - Refreshed note-editor styling in `frontend/src/styles.css`, added `backend/tests/test_note_editor_tags.py`, and updated the existing image-editor source guard after switching inline image insertion to a type-safe `insertContent(...)` call that still preserves `assetId` attrs.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_editor_images.py`
+  - `backend/tests/test_note_editor_tags.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/tags.ts`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_tags.py backend/tests/test_note_editor_tiptap.py backend/tests/test_note_editor_images.py` ✅
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (131 passed)
+- PRD updates made
+  - Marked `US-068` as passed and added a durable note about the shared frontend tag-normalization helper plus the editable chip/input tag UI.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering, tag auto-conversion/rollback, action wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-editor tag normalization in one frontend helper so manual tag editing and later `#tag` auto-conversion share the same UX rules while the backend stays authoritative.
+  - Gotchas encountered
+    - A draft tag list needs its own nullable state instead of falling back to the loaded note tags when empty, or removing the last tag will immediately repopulate the original server values.
+  - Useful context
+    - `frontend/src/App.tsx` now exposes manual tag editing locally on the note screen, which the later Save wiring story can send to `PATCH /api/notes/{id}` without reworking the tag UI structure.
+---
+
+## [2026-03-15 17:30:59 +0300] - EP-009 / US-071
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement Save, Delete with confirm, and Reindex actions on the note screen
+Thread: CLI run
+- What was implemented
+  - Extended `frontend/src/api.ts` with shared note-mutation helpers for `PATCH /api/notes/{id}`, `POST /api/notes/{id}/reindex`, and `DELETE /api/notes/{id}` plus the `AsyncAccepted`/save-payload types needed by the note screen.
+  - Updated `frontend/src/App.tsx` so the note screen now edits title and folder locally, sends title/folder/tags/editor `content_json` on Save, asks for explicit confirmation before Delete, redirects home after deletion, and refreshes note detail through REST after accepted Save/Reindex responses so the UI stays aligned with persisted backend status.
+  - Added frontend source-guard coverage in `backend/tests/test_note_editor_actions.py`, refreshed `backend/tests/test_note_detail_screen.py`, and recorded the reusable mutation-helper/REST-refresh pattern in `AGENTS.md`.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `backend/tests/test_note_editor_actions.py`
+  - `python -m pytest backend/tests/test_note_detail_screen.py backend/tests/test_note_editor_actions.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (139 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-071` as passed and added a durable note about shared frontend mutation helpers, destructive Delete confirmation, and REST refresh after Save/Reindex acceptance.
+  - Re-evaluated `EP-009`; it remains `passes: false` because inline image rendering and note-screen warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-screen mutations behind shared API helpers and refresh the note detail after accepted mutations so the editor stays REST-driven even while Processing continues asynchronously.
+  - Gotchas encountered
+    - Save can return either `200 NoteDetailDto` or `202 AsyncAcceptedDto`, so the frontend has to handle both response shapes instead of assuming a single payload type.
+  - Useful context
+    - The editor screen now owns draft title/folder/tag/content state locally, while `GET /api/notes/{id}` remains the source of truth used to resync status and persisted content after Save/Reindex calls.
+---
+
+## [2026-03-15 17:47:16 +0300] - EP-009 / US-067
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Render inline note images from backend asset URLs
+Thread: CLI run
+- What was implemented
+  - Updated `frontend/src/App.tsx` so the centralized `AssetImage` Tiptap extension now derives `/api/assets/{assetId}` during image-node rendering whenever a persisted node has `assetId` but no stored `src`, while keeping images inline in the editor text flow.
+  - Switched newly inserted image nodes to the same `assetId`-derived asset URL helper and expanded `backend/tests/test_note_editor_images.py` coverage to lock in the render-time asset URL fallback plus the inline-image styling contract.
+  - Recorded the reusable assetId-driven render rule in `AGENTS.md` and the top-level `## Codebase Patterns` section so later editor work keeps inline image resolution centralized.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_editor_images.py`
+  - `frontend/src/App.tsx`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_editor_images.py backend/tests/test_note_editor_tiptap.py backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (140 passed)
+  - `docker compose build frontend` ✅
+- PRD updates made
+  - Marked `US-067` as passed and added a durable note about deriving inline render URLs from `assetId` so note reloads do not depend on persisted `src`.
+  - Re-evaluated `EP-009`; it remains `passes: false` because the warning-detail story `US-072` is still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep inline note-image rendering inside the centralized Tiptap image extension so both fresh uploads and reloaded notes resolve `/api/assets/{assetId}` from `assetId` consistently.
+  - Gotchas encountered
+    - Persisted note content may legitimately omit `src` because `assetId` is the real source of truth, so relying on stored `src` alone can make previously uploaded images disappear after reload.
+- Useful context
+  - `frontend/src/App.tsx` now treats `assetId` as enough information to render inline images in the editor, while the remaining EP-009 work is limited to surfacing warning/error detail more richly on the note screen.
+---
+
+## [2026-03-15 18:06:02 +0300] - EP-009 / US-072
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Display current status, processing error, and warning details on the note screen
+Thread: CLI run
+- What was implemented
+  - Added a dedicated processing-status panel to `frontend/src/App.tsx` with status-specific copy derived from `NoteDetailDto`, so the editor now explains Draft, Processing, Ready, and Error states without adding any client-side pipeline logic.
+  - Introduced a typed frontend `ProcessingWarning` contract in `frontend/src/api.ts`, normalized warning payloads in one helper, and expanded the warning list UI to show `stage`, `target`, `code`, and `retryable` metadata with a fallback message when only note-level warning counts are available.
+  - Highlighted `processing_error` more clearly, refreshed `frontend/src/styles.css` for the new status/warning presentation, and added source-guard coverage in `backend/tests/test_note_detail_screen.py` to lock in the new status and warning rendering flow.
+- Files changed
+  - `AGENTS.md`
+  - `backend/tests/test_note_detail_screen.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `python -m pytest backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (159 passed)
+- PRD updates made
+  - Marked `US-072` as passed and added a durable note about typed warning rendering, normalized frontend fallbacks, and distinct `processing_error` presentation.
+  - Re-evaluated `EP-009`; all nested stories and epic-level acceptance criteria are now satisfied, so the epic is marked `passes: true`.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-detail warning rendering behind one frontend normalization helper so backend warning metadata can stay presentation-ready even when some optional fields are absent from the payload.
+  - Gotchas encountered
+    - `has_warnings=true` does not guarantee a fully populated `processing_warnings` array, so the note screen still needs a graceful fallback summary instead of assuming detailed entries always exist.
+  - Useful context
+    - `frontend/src/App.tsx` now treats `NoteDetailDto` as the only source of truth for note status, warning details, and `processing_error`, while the editor interactions remain wired through the existing shared REST helpers.
 ---

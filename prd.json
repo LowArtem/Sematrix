@@ -1028,8 +1028,8 @@
             "Unknown note IDs are handled gracefully via the backend error response"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The editor page is the main workspace for one note. It must use the public API only."
+          "passes": true,
+          "notes": "The editor page is the main workspace for one note. It must use the public API only. Added a frontend note-detail route that loads `NoteDetailDto` plus folder options through shared `frontend/src/api.ts` helpers, renders title/folder/tags/content/status/warnings/action sections from backend data, and surfaces unknown-note API errors directly in the screen instead of failing silently."
         },
         {
           "id": "US-065",
@@ -1041,8 +1041,8 @@
             "Unsupported extra editor features are not required to satisfy MVP"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly fixes the minimum supported Tiptap feature set."
+          "passes": true,
+          "notes": "The spec explicitly fixes the minimum supported Tiptap feature set. The note screen now swaps the JSON textarea for a centralized Tiptap editor configured with StarterKit plus Link and inline Image support, exposes toolbar actions for paragraphs/bold/italic/lists/links/code blocks/headings/block quotes, and mirrors edits back to serialized `content_json` through `editor.getJSON()` for later Save wiring."
         },
         {
           "id": "US-066",
@@ -1056,8 +1056,8 @@
             "The rendered image can use /api/assets/{assetId} as src but data URLs are not stored in content_json"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec is explicit that assetId is required in the node and data URLs must not be the source of truth."
+          "passes": true,
+          "notes": "The spec is explicit that assetId is required in the node and data URLs must not be the source of truth. The note editor now routes toolbar upload, drag-drop, and clipboard paste through one shared frontend upload helper that posts `note_id` plus image file to `/api/assets/image`, then inserts inline Tiptap image nodes with `assetId` as the durable source of truth and backend asset URLs only as derived render data."
         },
         {
           "id": "US-067",
@@ -1069,8 +1069,8 @@
             "Image rendering resolves the uploaded asset through the backend asset route"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "This is the user-visible half of the assetId-based image model defined by the spec."
+          "passes": true,
+          "notes": "This is the user-visible half of the assetId-based image model defined by the spec. The centralized note-editor image extension now keeps images inline in the text flow and derives `/api/assets/{assetId}` render URLs from `assetId`, so reloaded notes still display uploaded images even when the persisted `content_json` omits a stored `src` attribute."
         },
         {
           "id": "US-068",
@@ -1083,8 +1083,8 @@
             "The UI respects backend normalization/validation rules"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The tags block is required separately from text auto-conversion. Tags are created on first use."
+          "passes": true,
+          "notes": "The tags block is required separately from text auto-conversion. Tags are created on first use. The note screen now keeps a dedicated manual tag area with removable chips plus an add-tag input, and reuses a shared frontend normalization helper that trims, lowercases, validates, and deduplicates tag names with the same Latin/Cyrillic/digit/underscore rules enforced on the backend."
         },
         {
           "id": "US-069",
@@ -1098,8 +1098,8 @@
             "The whole conversion is one undo transaction in Tiptap"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "This behavior is explicitly defined step by step in section 4.3 and must not be implemented as multiple independent undo actions."
+          "passes": true,
+          "notes": "This behavior is explicitly defined step by step in section 4.3 and must not be implemented as multiple independent undo actions. The note editor now watches normal-text completion keys in one shared Tiptap keydown path, ignores link/code contexts, removes the finished `#tag` token in a single transaction, normalizes and merges the tag into the note tag list, and moves focus to the tag input for the follow-up rollback story."
         },
         {
           "id": "US-070",
@@ -1111,8 +1111,8 @@
             "Rollback behavior is limited to the latest auto-conversion flow described in the spec"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires both undo paths and ties them to the one-transaction Tiptap implementation."
+          "passes": true,
+          "notes": "The spec explicitly requires both undo paths and ties them to the one-transaction Tiptap implementation. The note screen now tracks only the latest auto-conversion as rollbackable, uses a `NoteEditor` imperative undo handle to restore the original editor token via one Tiptap undo step, removes the newly created tag only when that conversion actually added it, and wires both Ctrl+Z plus empty-input Backspace on the tag field to the same rollback path."
         },
         {
           "id": "US-071",
@@ -1125,8 +1125,8 @@
             "The frontend handles 200 Draft and 202 Processing responses from Save correctly"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The spec explicitly requires Delete confirmation and a separate Reindex action."
+          "passes": true,
+          "notes": "The spec explicitly requires Delete confirmation and a separate Reindex action. The note screen now routes Save/Delete/Reindex through shared `frontend/src/api.ts` helpers, sends title/folder/tags/editor `content_json` on Save, asks for explicit destructive confirmation before Delete, redirects home after a successful delete, and refreshes note detail through normal REST reads after Save/Reindex acceptances so 200 Draft and 202 Processing responses both leave the UI aligned with persisted backend state."
         },
         {
           "id": "US-072",
@@ -1138,13 +1138,13 @@
             "If processing_warnings exist, the screen shows that warnings are present and can present their details or summary"
           ],
           "priority": 2,
-          "passes": false,
-          "notes": "The backend stores warning structures specifically so the UI can surface them. Exact styling is flexible, but the information must be available."
+          "passes": true,
+          "notes": "The backend stores warning structures specifically so the UI can surface them. The note screen now adds a dedicated processing-status panel, renders warning details from a typed `ProcessingWarning` frontend contract with `stage`/`target`/`code`/`retryable` metadata plus graceful fallback copy when only the warning count is present, and highlights `processing_error` distinctly without inventing client-side pipeline logic."
         }
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec."
+      "passes": true,
+      "notes": "This epic is strictly about the editor screen behavior. It must not add autosave, collaborative editing, nested folders, or unsupported block types beyond the minimum listed in the spec. The note detail route, Tiptap baseline, assetId-backed image insertion plus inline rendering, manual tag editing, `#tag` auto-conversion with rollback, Save/Delete/Reindex wiring, and note-level status/warning/error rendering now satisfy the epic acceptance criteria."
     },
     {
       "id": "EP-010",
