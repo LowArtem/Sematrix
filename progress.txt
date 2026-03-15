@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Keep frontend note-detail and folder reads in shared `frontend/src/api.ts` helpers so route components stay focused on screen state while `/api/notes/{id}` and `/api/folders` contracts remain centralized.
 - Keep the required repository scaffold protected by a lightweight pytest that asserts the fixed top-level and backend layer paths exist.
 - Keep the PRD integration branch name distinct from the epic branch namespace; Git cannot create a branch like `foo` once epic branches already use `foo/...`.
 - Guard Docker Compose changes with both `docker compose config --services` and a real `docker compose up --build` smoke test against the backend health route and frontend root.
@@ -75,6 +76,38 @@ Thread: CLI run
     - If note-level warning mirroring commits each warning separately, the stage loop can thrash the database; the repository should merge warning batches in one write per processed object.
   - Useful context
     - `PipelineFailureHandler` still owns whole-stage errback warnings, while the per-object OCR/link/caption warnings now appear on `GET /api/notes/{id}` during `Processing` as well as after `Ready` finalization.
+---
+
+## [2026-03-15 12:21:21 +0300] - EP-009 / US-064
+Epic: Note editor, Tiptap behavior, image nodes, and note actions
+Epic Branch: ralph/sematrix-mvp/ep-009-note-editor
+Story: Implement the note detail screen and backend data loading flow
+Thread: CLI run
+- What was implemented
+  - Replaced the frontend placeholder with a route-aware note detail screen that loads `GET /api/notes/{id}` and `GET /api/folders` through shared `frontend/src/api.ts` helpers and renders the loaded `NoteDetailDto` fields in a dedicated note workspace layout.
+  - Added note detail UI sections for title, folder selection, tags, content JSON, summary, status, warnings, processing error, and the Save/Reindex/Delete action row, while keeping unknown note IDs user-visible through the backend `ApiErrorDto` message/code.
+  - Added `backend/tests/test_note_detail_screen.py` source guards for the new frontend API helpers, note-route loading flow, rendered detail fields, and backend-error handling.
+- Files changed
+  - `backend/tests/test_note_detail_screen.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api.ts`
+  - `frontend/src/styles.css`
+  - `prd.json`
+  - `progress.txt`
+- Checks run and results
+  - `python -m pytest backend/tests/test_note_detail_screen.py` ✅
+  - `npm run build` ✅
+  - `python -m pytest` ✅ (124 passed)
+- PRD updates made
+  - Marked `US-064` as passed and added a durable note about the note-detail route, shared frontend API helpers, and direct backend-error surfacing.
+  - Re-evaluated `EP-009`; it remains `passes: false` because the Tiptap, image, tag-editing, save/delete/reindex wiring, and warning-detail stories are still open.
+- Learnings for future iterations:
+  - Patterns discovered
+    - Keep note-detail and folder fetches in shared frontend API helpers so future editor stories can reuse the same REST contracts without duplicating fetch/error logic in route components.
+  - Gotchas encountered
+    - The note-detail route needs folder data alongside `NoteDetailDto` on first load, or the folder selector cannot render the current `folder_id` coherently.
+  - Useful context
+    - `frontend/src/App.tsx` now treats `/notes/:id` as the editor route and shows backend error payloads directly, which later Tiptap and action stories can build on without changing the route contract.
 ---
 
 ## [2026-03-15 01:34:54 +0300] - EP-006 / US-046

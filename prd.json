@@ -1028,8 +1028,8 @@
             "Unknown note IDs are handled gracefully via the backend error response"
           ],
           "priority": 1,
-          "passes": false,
-          "notes": "The editor page is the main workspace for one note. It must use the public API only."
+          "passes": true,
+          "notes": "The editor page is the main workspace for one note. It must use the public API only. Added a frontend note-detail route that loads `NoteDetailDto` plus folder options through shared `frontend/src/api.ts` helpers, renders title/folder/tags/content/status/warnings/action sections from backend data, and surfaces unknown-note API errors directly in the screen instead of failing silently."
         },
         {
           "id": "US-065",
